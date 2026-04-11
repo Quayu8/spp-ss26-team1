@@ -18,5 +18,5 @@ Closes #
 
 - [ ] Tests added/updated for this change
 - [ ] Sidecar docs (`*.md`) updated if behavior changed
-- [ ] All tests pass locally (`npm test` in both packages)
+- [ ] All tests pass locally (`pnpm test` in both packages)
 - [ ] Commit message follows [conventional commits](https://www.conventionalcommits.org/) format

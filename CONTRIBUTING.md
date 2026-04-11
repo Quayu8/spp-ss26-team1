@@ -6,7 +6,7 @@ Thank you for your interest in contributing! This document covers the developmen
 
 ### Prerequisites
 
-- **Node.js** ≥ 20 and **npm** ≥ 10
+- **Node.js** ≥ 20 and **pnpm** ≥ 10 (enable via `corepack enable`)
 - A WebXR-capable browser (or Chrome DevTools WebXR emulation) for E2E testing
 
 ### Clone and Install
@@ -15,13 +15,8 @@ Thank you for your interest in contributing! This document covers the developmen
 git clone https://github.com/cs-util-com/location-based-webxr.git
 cd location-based-webxr
 
-# Install framework dependencies
-cd GpsPlusSlamJs_AppFramework
-npm install
-
-# Install recorder app dependencies
-cd ../GpsPlusSlamJs_RecorderApp
-npm install
+# Install all dependencies (pnpm workspaces — installs both packages)
+pnpm install
 ```
 
 ### Running Tests
@@ -29,17 +24,17 @@ npm install
 ```bash
 # Framework: format, lint, typecheck, and unit tests
 cd GpsPlusSlamJs_AppFramework
-npm test
+pnpm test
 
 # Recorder: format, lint, typecheck, unit tests, and E2E tests
 cd GpsPlusSlamJs_RecorderApp
-npm test
+pnpm test
 
 # Unit tests only (faster iteration)
-npm run test:unit
+pnpm run test:unit
 
 # E2E tests only
-npm run test:e2e
+pnpm run test:e2e
 ```
 
 ## Coding Standards
@@ -67,7 +62,7 @@ Every code file that implements behavior must have a colocated `*.md` sidecar fi
 ### Code Quality
 
 - **TypeScript** — strict mode, no `any` unless justified.
-- **Formatting** — Prettier (runs automatically in `npm test`).
+- **Formatting** — Prettier (runs automatically in `pnpm test`).
 - **Linting** — ESLint with the project config.
 - **No circular dependencies** — enforced by `dpdm`.
 - **No dead code** — enforced by `knip`.
@@ -94,8 +89,8 @@ Examples:
 2. **Write tests first** — every PR should include tests for the changes.
 3. **Run the full test suite** locally before pushing:
    ```bash
-   cd GpsPlusSlamJs_AppFramework && npm test
-   cd ../GpsPlusSlamJs_RecorderApp && npm test
+   cd GpsPlusSlamJs_AppFramework && pnpm test
+   cd ../GpsPlusSlamJs_RecorderApp && pnpm test
    ```
 4. **Open a PR** with a clear description of what and why.
 5. **CI runs automatically** — framework tests, recorder unit tests, and E2E tests must all pass.

@@ -40,7 +40,7 @@ A free **community license key** is included in the recorder app for evaluation 
 ### Prerequisites
 
 - Node.js ≥ 20
-- npm ≥ 10
+- pnpm ≥ 10 (enable via `corepack enable`)
 
 ### Install and Run the Recorder App
 
@@ -49,10 +49,12 @@ A free **community license key** is included in the recorder app for evaluation 
 git clone https://github.com/cs-util-com/location-based-webxr.git
 cd location-based-webxr
 
-# Install dependencies and start the dev server
+# Install all dependencies (pnpm workspaces — installs both packages)
+pnpm install
+
+# Start the dev server
 cd GpsPlusSlamJs_RecorderApp
-npm install
-npm run dev
+pnpm run dev
 ```
 
 The recorder app opens at `http://localhost:5173`. Use a WebXR-capable device (or browser emulation) to start recording AR+GPS sessions.
@@ -61,24 +63,23 @@ The recorder app opens at `http://localhost:5173`. Use a WebXR-capable device (o
 
 ```bash
 cd GpsPlusSlamJs_AppFramework
-npm install
-npm run build
+pnpm run build
 ```
 
 ### Run Tests
 
 ```bash
 # All tests (framework + recorder unit + recorder E2E)
-npm test
+pnpm test
 
 # Framework tests only
-npm run test:framework
+pnpm run test:framework
 
 # Recorder unit tests only
-npm run test:recorder:unit
+pnpm run test:recorder:unit
 
 # Recorder E2E tests only
-npm run test:recorder:e2e
+pnpm run test:recorder:e2e
 ```
 
 ## Building Your Own App
@@ -86,7 +87,7 @@ npm run test:recorder:e2e
 Install the framework and core library:
 
 ```bash
-npm install gps-plus-slam-app-framework gps-plus-slam-js
+pnpm add gps-plus-slam-app-framework gps-plus-slam-js
 ```
 
 ```ts
