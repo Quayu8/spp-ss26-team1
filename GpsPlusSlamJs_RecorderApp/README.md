@@ -1379,10 +1379,10 @@ The project includes several static analysis tools matching the library's qualit
 
 This app is licensed under **Apache 2.0** — see [LICENSE](LICENSE).
 
-> **Note:** This app depends on [gps-plus-slam-js](../GpsPlusSlamJs/), which is a **closed-source, proprietary** library distributed via npm under a separate license. A community license key is included for frictionless development. See the core library's EULA for usage terms.
+> **Note:** This app depends on `gps-plus-slam-js`, which is a **closed-source, proprietary** library distributed via [npm](https://www.npmjs.com/package/gps-plus-slam-js) under a separate license. A community license key is included for frictionless development. See the core library's EULA for usage terms.
 
 ## Related Projects
 
-- **GpsPlusSlamJs** (`../GpsPlusSlamJs/`) — The core TypeScript library (closed-source) this recorder feeds data into.
+- **gps-plus-slam-js** ([npm](https://www.npmjs.com/package/gps-plus-slam-js)) — The core TypeScript library (closed-source) this recorder feeds data into.
 - **GpsPlusSlamJs_AppFramework** (`../GpsPlusSlamJs_AppFramework/`) — Reusable AR+GPS framework layer (open-source, Apache 2.0).
 - **Replay Mode** — Built into this app. When opened on a desktop browser (no WebXR), the app automatically switches to a 3D replay/debug UX. See the "Replay Mode" section above.

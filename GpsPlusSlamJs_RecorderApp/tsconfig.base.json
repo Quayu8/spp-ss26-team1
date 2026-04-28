@@ -13,14 +13,12 @@
     "esModuleInterop": true,
     "allowSyntheticDefaultImports": true,
     "paths": {
-      "gps-plus-slam-js": ["../GpsPlusSlamJs/src/index.ts"],
       "gps-plus-slam-app-framework": ["../GpsPlusSlamJs_AppFramework/src/index.ts"],
       "gps-plus-slam-app-framework/*": ["../GpsPlusSlamJs_AppFramework/src/*"]
     }
   },
   "include": [
     "src/**/*.ts",
-    "../GpsPlusSlamJs/src/**/*.ts",
     "../GpsPlusSlamJs_AppFramework/src/**/*.ts"
   ]
 }

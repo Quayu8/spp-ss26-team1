@@ -22,7 +22,7 @@ The primary TypeScript configuration for the recorder app source code. This conf
 | Alias | Maps To | Usage |
 |-------|---------|-------|
 | `@app/*` | `src/*` | Internal app imports |
-| `gps-plus-slam-js` | `../GpsPlusSlamJs/src/index.ts` | Resolves the npm package name to library **source** instead of `dist/index.d.ts`, ensuring tsc always type-checks against the real (readonly) types rather than potentially stale build output |
+| `gps-plus-slam-app-framework` | `../GpsPlusSlamJs_AppFramework/src/index.ts` | Resolves the workspace AppFramework package to its source so tsc type-checks against current sources rather than `dist/`. The closed-source `gps-plus-slam-js` is consumed normally from `node_modules` (published npm package or `LOCAL_CORE` symlink). |
 
 ## Scope
 

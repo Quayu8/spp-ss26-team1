@@ -21,9 +21,9 @@ TypeScript configuration specifically for type-checking test files with Vitest g
 | Alias | Maps To |
 |-------|---------|
 | `@app/*` | `src/*` |
-| `gps-plus-slam-js` | `../GpsPlusSlamJs/src/index.ts` |
+| `gps-plus-slam-app-framework` | `../GpsPlusSlamJs_AppFramework/src/index.ts` |
 
-The `gps-plus-slam-js` alias resolves the npm package name to library source, matching the main tsconfig. This ensures test mocks and type assertions stay in sync with the real library types (e.g., `readonly` tuple modifiers).
+The `gps-plus-slam-app-framework` alias resolves the workspace AppFramework to its source, matching the main tsconfig. The closed-source `gps-plus-slam-js` is consumed normally from `node_modules` (published npm package or `LOCAL_CORE` symlink), so no alias is needed for it.
 
 ## Invariants
 

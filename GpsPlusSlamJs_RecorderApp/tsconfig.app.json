@@ -13,12 +13,8 @@
     "node_modules",
     "src/**/*.test.ts",
     "src/**/*.spec.ts",
-    "../GpsPlusSlamJs/src/**/*.test.ts",
-    "../GpsPlusSlamJs/src/**/*.spec.ts",
     "../GpsPlusSlamJs_AppFramework/src/**/*.test.ts",
     "../GpsPlusSlamJs_AppFramework/src/**/*.spec.ts",
-    "../GpsPlusSlamJs/src/perf/**",
-    "../GpsPlusSlamJs/src/test-setup.ts",
     "../GpsPlusSlamJs_AppFramework/src/test-setup.ts",
     "../GpsPlusSlamJs_AppFramework/src/test-utils/**"
   ]

@@ -1,6 +1,6 @@
 # GPS+SLAM App Framework
 
-Reusable building blocks for AR+GPS applications built on [gps-plus-slam-js](../GpsPlusSlamJs/).
+Reusable building blocks for AR+GPS applications built on [gps-plus-slam-js](https://www.npmjs.com/package/gps-plus-slam-js).
 
 This library provides WebXR session management, Three.js visualization, GPS sensor coordination, storage abstractions, a replay engine, and store wiring — everything a web-based AR+GPS app needs beyond the core alignment algorithms.
 
@@ -214,9 +214,9 @@ src/
 
 This framework is licensed under **Apache 2.0** — see [LICENSE](LICENSE).
 
-> **Note:** This package depends on [gps-plus-slam-js](../GpsPlusSlamJs/), which is a **closed-source, proprietary** library distributed via npm under a separate license. A community license key is included in the open-source apps for frictionless development. See the core library's EULA for usage terms.
+> **Note:** This package depends on [gps-plus-slam-js](https://www.npmjs.com/package/gps-plus-slam-js), which is a **closed-source, proprietary** library distributed via npm under a separate license. A community license key is included in the open-source apps for frictionless development. See the core library's EULA for usage terms.
 
 ## See Also
 
-- [gps-plus-slam-js](../GpsPlusSlamJs/) — Core alignment algorithms (closed-source, UNLICENSED)
+- [gps-plus-slam-js](https://www.npmjs.com/package/gps-plus-slam-js) — Core alignment algorithms (closed-source, UNLICENSED)
 - [Recorder App](../GpsPlusSlamJs_RecorderApp/) — Full-featured recording app built on this framework

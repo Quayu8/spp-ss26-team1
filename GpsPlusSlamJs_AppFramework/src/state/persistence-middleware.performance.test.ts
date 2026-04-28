@@ -11,8 +11,6 @@
  * instance and measures the average synchronous overhead per dispatch.
  * The storage backend resolves instantly (Promise.resolve) so only the
  * middleware's own synchronous code is measured.
- *
- * @see ../../../GpsPlusSlamJs/docs/vitest-bench-integration-plan.md — step 8
  */
 
 import { describe, expect, test, vi } from 'vitest';

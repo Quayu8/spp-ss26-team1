@@ -39,4 +39,3 @@ No external fixtures. Uses minimal inline Redux slices (`recorder` + `gpsData`) 
 - [persistence-middleware.ts](persistence-middleware.ts) — production implementation
 - [persistence-middleware.test.ts](persistence-middleware.test.ts) — functional/unit tests (16 tests)
 - [persistence-middleware.ts.md](persistence-middleware.ts.md) — component documentation
-- [vitest-bench-integration-plan.md](../../../GpsPlusSlamJs/docs/vitest-bench-integration-plan.md) — step 8

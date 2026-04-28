@@ -6,7 +6,6 @@
     "checkJs": true,
     "types": ["vitest/globals", "node", "vite/client"],
     "paths": {
-      "gps-plus-slam-js": ["../GpsPlusSlamJs/src/index.ts"],
       "gps-plus-slam-app-framework": [
         "../GpsPlusSlamJs_AppFramework/src/index.ts"
       ],
@@ -17,8 +16,6 @@
     "dist",
     "coverage",
     "node_modules",
-    "../GpsPlusSlamJs/src/**/*.test.ts",
-    "../GpsPlusSlamJs/src/**/*.spec.ts",
     "../GpsPlusSlamJs_AppFramework/src/**/*.test.ts",
     "../GpsPlusSlamJs_AppFramework/src/**/*.spec.ts"
   ]
