@@ -1,0 +1,4 @@
+packages:
+  - GpsPlusSlamJs_AppFramework
+  - GpsPlusSlamJs_RecorderApp
+  - GpsPlusSlamJs_MinimalExample
