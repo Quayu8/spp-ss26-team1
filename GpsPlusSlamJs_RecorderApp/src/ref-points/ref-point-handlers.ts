@@ -28,24 +28,25 @@ import {
   extractOdomRotation,
 } from 'gps-plus-slam-app-framework/state/recording-coordinator';
 import { showError, updateStatus } from '../ui/hud';
+import { showToast } from '../ui/toast';
 import {
   markReferencePoint,
   setImportedRefPoints as setImportedRefPointsAction,
   incrementRefPointUsage,
   clearSessionRefPointUsage as clearSessionRefPointUsageAction,
   resetRefPointsState,
+  addCurrentRefPointMark,
   selectCachedKnownRefPoints,
   type GpsPoint,
 } from 'gps-plus-slam-app-framework/state/store';
 import { fusedGpsFromOdom } from 'gps-plus-slam-app-framework/utils/fused-path';
-import { refPointVisualizer } from 'gps-plus-slam-app-framework/visualization/reference-points';
 import { createLogger } from 'gps-plus-slam-app-framework/utils/logger';
 import {
   gpsToH3,
   findNearbyRefPoint,
 } from 'gps-plus-slam-app-framework/ref-points/h3-ref-point';
-import { webxrToNUE } from 'gps-plus-slam-js';
-import type { Vector3, Quaternion } from 'gps-plus-slam-js';
+import { webxrToNUE } from 'gps-plus-slam-app-framework/core';
+import type { Vector3, Quaternion } from 'gps-plus-slam-app-framework/core';
 import type { RecorderStore } from 'gps-plus-slam-app-framework/state/store';
 
 const log = createLogger('RefPointHandlers');
@@ -182,7 +183,7 @@ export function createRefPointHandlers(
     refPointId: string,
     refPointName: string,
     observation: RefPointObservation
-  ): Promise<void> {
+  ): Promise<boolean> {
     try {
       await saveRefPointObservation(
         scenarioHandle,
@@ -191,9 +192,11 @@ export function createRefPointHandlers(
         observation
       );
       log.info(`Saved reference point ${refPointId} to scenario refPoints/`);
+      return true;
     } catch (err) {
       log.error('Failed to save reference point:', err);
       showError('Failed to save reference point to disk');
+      return false;
     }
   }
 
@@ -207,14 +210,18 @@ export function createRefPointHandlers(
   ): void {
     // Prefer fused GPS so the red current-session sphere sits where the
     // next session's green sphere will appear (loader also prefers fused —
-    // see 2026-04-24-refpoint-positioning-investigation.md §7). Select
-    // the source object first so lat/lon and altitude always come from
-    // the same source (never mix fused horizontals with raw altitude).
-    const src = fusedGpsPoint ?? lastGpsPoint;
+    // see 2026-04-24-refpoint-positioning-investigation.md §7).
+    //
+    // Per-field fallback (Option B, 2026-04-29 user-feedback Finding 1):
+    // mirrors `flattenRefPointsToMarks` in the loader. Fused altitude may
+    // be undefined on legacy recordings (calcGpsCoords altitude-discard
+    // bug); falling back to raw altitude recovers the value the recorder
+    // originally intended. New recordings (post-fix) populate fused
+    // altitude themselves, so the fallback only fires for legacy data.
     const gpsPosition = {
-      lat: src.latitude,
-      lon: src.longitude,
-      altitude: src.altitude,
+      lat: fusedGpsPoint?.latitude ?? lastGpsPoint.latitude,
+      lon: fusedGpsPoint?.longitude ?? lastGpsPoint.longitude,
+      altitude: fusedGpsPoint?.altitude ?? lastGpsPoint.altitude,
     };
     const refPointMark: RefPointMark = {
       id: refPointId,
@@ -223,7 +230,10 @@ export function createRefPointHandlers(
       gpsPosition,
       timestamp,
     };
-    refPointVisualizer.addCurrentRefPoint(refPointMark);
+    // Finding 5: dispatch into the slice; the visualizer subscribes via
+    // wireStoreSubscribers and renders the red sphere from there.
+    // See docs/2026-04-30-refpoint-marks-into-redux-plan.md.
+    deps.getStore().dispatch(addCurrentRefPointMark(refPointMark));
   }
 
   // --- Main handler ---
@@ -352,6 +362,7 @@ export function createRefPointHandlers(
       );
 
       // Persist to disk
+      let persistOk = true;
       if (scenarioHandle) {
         const observation = buildRefPointObservation(
           odomPosition,
@@ -360,7 +371,7 @@ export function createRefPointHandlers(
           timestamp,
           fusedGpsPoint
         );
-        await persistRefPointObservation(
+        persistOk = await persistRefPointObservation(
           scenarioHandle,
           refPointId,
           refPointName,
@@ -379,6 +390,16 @@ export function createRefPointHandlers(
       );
 
       updateStatus(`Marked reference point: ${refPointId}`);
+
+      // Re-observation toast feedback (Finding 3, 2026-04-29 user feedback):
+      // the single-click re-observation branch shows no picker, so the user
+      // otherwise has no confirmation. Picker-driven new-ref-point flow has
+      // implicit feedback via the picker UI itself, so it does NOT toast.
+      // Only fire after the OPFS write succeeds — the toast reflects the
+      // durable end state, not just the dispatch.
+      if (nearbyMatch && persistOk) {
+        showToast(`Re-observed "${refPointName}"`, { severity: 'info' });
+      }
 
       // Track usage in current session (Issue 6) via Redux
       deps.getStore().dispatch(incrementRefPointUsage(refPointId));

@@ -61,7 +61,7 @@ export class RefPointVisualizer {
    *
    * @param refPoints - Array of reference point marks to visualize
    */
-  displayPriorRefPoints(refPoints: RefPointMark[]): void {
+  displayPriorRefPoints(refPoints: readonly RefPointMark[]): void {
     if (!this.zeroRef) {
       log.warn('No zero reference set');
       return;

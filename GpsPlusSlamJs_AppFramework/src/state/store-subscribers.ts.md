@@ -8,11 +8,11 @@ Uses `subscribeToSelector` for selective change detection — each state slice (
 
 ## Public API
 
-| Symbol                 | Signature                                                                                                                                                                                          | Description                                                              |
-| ---------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------ |
-| `wireStoreSubscribers` | `(store: SubscribableStore, deps: StoreSubscriberDeps) => () => void`                                                                                                                              | Subscribe to store changes and drive visualizers. Returns unsubscribe.   |
-| `SubscribableStore`    | `{ getState, subscribe }` interface                                                                                                                                                                | Minimal store contract — satisfied by `RecorderStore` and replay stores. |
-| `StoreSubscriberDeps`  | `{ applyAlignmentMatrix, gpsEventVisualizer: { addGpsEvent, setZeroRef, addAlignmentSnapshot }, mapOverlay?, onNewGpsPosition?, onNewOdomPose?, onAlignmentSnapshot?, onNewGpsLatLng? }` interface | Injected dependencies for visualization updates.                         |
+| Symbol                 | Signature                                                                                                                                                            | Description                                                              |
+| ---------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------ |
+| `wireStoreSubscribers` | `(store: SubscribableStore, deps: StoreSubscriberDeps) => () => void`                                                                                                | Subscribe to store changes and drive visualizers. Returns unsubscribe.   |
+| `SubscribableStore`    | `{ getState, subscribe }` interface                                                                                                                                  | Minimal store contract — satisfied by `RecorderStore` and replay stores. |
+| `StoreSubscriberDeps`  | `{ applyAlignmentMatrix, gpsEventVisualizer, mapOverlay?, refPointVisualizer?, onNewGpsPosition?, onNewOdomPose?, onAlignmentSnapshot?, onNewGpsLatLng? }` interface | Injected dependencies for visualization updates.                         |
 
 ### `mapOverlay` dependency (optional)
 
@@ -35,6 +35,10 @@ On each state change the subscriber:
 5. **AR pose update** — if `deps.onNewOdomPose` is provided, calls it with `(odomPosition, odomRotation)` for each new event that has both position and rotation data. Used in replay mode to update the `arpose` Object3D so the camera follows the recorded trajectory.
 6. **Map overlay** — updates `deps.mapOverlay.setGpsPosition(lat, lon)` with the latest GPS position. For each new GPS event with an alignment matrix and zero reference, computes the fused GPS position via `fusedGpsFromOdom(alignmentMatrix, odomPos, zeroRef)` and calls `addFusedPoint`. When alignment matrix changes, calls `addAlignmentSnapshot` with the snapshot's GPS coordinates. Incrementally forwards new reference points via `addRefPoint(lat, lon, id)`. All optional methods are safely skipped if not provided. Skipped entirely if `mapOverlay` is `null`/`undefined`.
 7. **GPS lat/lng callback** — if `deps.onNewGpsLatLng` is provided, calls it with `(lat, lng)` for each new GPS event. Used in live recording to drive ref-point proximity detection for the dynamic button label.
+8. **Reference-point visualization (Finding 5, 2026-04-30)** — if `deps.refPointVisualizer` is provided, two additional subscriptions are wired:
+   - `selectPriorRefPointMarks` → `displayPriorRefPoints(priorMarks)`. Fires whenever `priorMarks` changes by reference, replacing the green-sphere set wholesale.
+   - `selectCurrentRefPointMarks` → `addCurrentRefPoint(mark)`. Append-only with a high-water-mark counter (`lastCurrentMarksLen`). When the array shrinks (e.g., `clearCurrentRefPointMarks` on scenario reset), the counter is reset to 0 so subsequent re-adds render again.
+     Call sites no longer call `refPointVisualizer.displayPriorRefPoints` / `addCurrentRefPoint` directly — they dispatch `setPriorRefPointMarks` / `addCurrentRefPointMark` instead. See [docs/2026-04-30-refpoint-marks-into-redux-plan.md](../../../GpsPlusSlamJs_Docs/docs/2026-04-30-refpoint-marks-into-redux-plan.md).
 
 Each call creates **fresh selector subscriptions** scoped to that call — no manual reset needed between sessions.
 

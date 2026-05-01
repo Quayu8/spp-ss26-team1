@@ -16,10 +16,25 @@ import {
   incrementRefPointUsage,
   clearSessionRefPointUsage,
   resetRefPointsState,
+  setPriorRefPointMarks,
+  addCurrentRefPointMark,
+  clearCurrentRefPointMarks,
   selectCachedKnownRefPoints,
   type RefPointsState,
 } from './ref-points-slice';
 import type { ImportedRefPoint } from '../storage/ref-point-importer';
+import type { RefPointMark } from '../storage/ref-point-loader';
+
+function makeMark(overrides: Partial<RefPointMark> = {}): RefPointMark {
+  return {
+    id: '8b1a6b0c2d30fff',
+    odomPosition: [0, 0, 0],
+    odomRotation: [0, 0, 0, 1],
+    gpsPosition: { lat: 50.0, lon: 8.0, altitude: 245 },
+    timestamp: 1_700_000_000_000,
+    ...overrides,
+  };
+}
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -47,6 +62,8 @@ describe('refPointsSlice reducer', () => {
     const state = refPointsReducer(undefined, { type: '@@INIT' });
     expect(state.importedRefPoints).toEqual([]);
     expect(state.sessionRefPointUsage).toEqual({});
+    expect(state.priorMarks).toEqual([]);
+    expect(state.currentMarks).toEqual([]);
   });
 
   describe('setImportedRefPoints', () => {
@@ -149,10 +166,88 @@ describe('refPointsSlice reducer', () => {
       const populated: RefPointsState = {
         importedRefPoints: [makeRefPoint()],
         sessionRefPointUsage: { a: 5 },
+        priorMarks: [makeMark()],
+        currentMarks: [makeMark({ id: 'live' })],
       };
       const state = refPointsReducer(populated, resetRefPointsState());
       expect(state.importedRefPoints).toEqual([]);
       expect(state.sessionRefPointUsage).toEqual({});
+      expect(state.priorMarks).toEqual([]);
+      expect(state.currentMarks).toEqual([]);
+    });
+  });
+
+  // ---------------------------------------------------------------------
+  // RefPointMark[] actions — Finding 5 (refpoint marks → Redux).
+  // See docs/2026-04-30-refpoint-marks-into-redux-plan.md.
+  // Why these tests matter: the visualizer is being inverted from
+  // imperative caller to subscription consumer; the slice is the new
+  // source of truth that drives 3D rendering. Anything that can break
+  // serializability of these arrays (e.g. accidentally storing live
+  // Three.js objects) breaks DevTools and replay parity.
+  // ---------------------------------------------------------------------
+
+  describe('setPriorRefPointMarks', () => {
+    it('replaces priorMarks wholesale', () => {
+      const first = [makeMark({ id: 'a' }), makeMark({ id: 'b' })];
+      const second = [makeMark({ id: 'c' })];
+      let state = refPointsReducer(undefined, setPriorRefPointMarks(first));
+      expect(state.priorMarks).toEqual(first);
+      state = refPointsReducer(state, setPriorRefPointMarks(second));
+      expect(state.priorMarks).toEqual(second);
+    });
+
+    it('does not affect currentMarks', () => {
+      const initial: RefPointsState = {
+        importedRefPoints: [],
+        sessionRefPointUsage: {},
+        priorMarks: [],
+        currentMarks: [makeMark({ id: 'live' })],
+      };
+      const state = refPointsReducer(
+        initial,
+        setPriorRefPointMarks([makeMark({ id: 'prior' })])
+      );
+      expect(state.currentMarks).toEqual(initial.currentMarks);
+    });
+  });
+
+  describe('addCurrentRefPointMark', () => {
+    it('appends the mark to currentMarks', () => {
+      const m1 = makeMark({ id: 'a', timestamp: 1 });
+      const m2 = makeMark({ id: 'b', timestamp: 2 });
+      let state = refPointsReducer(undefined, addCurrentRefPointMark(m1));
+      state = refPointsReducer(state, addCurrentRefPointMark(m2));
+      expect(state.currentMarks).toEqual([m1, m2]);
+    });
+
+    it('does not affect priorMarks', () => {
+      const prior = [makeMark({ id: 'prior' })];
+      const initial: RefPointsState = {
+        importedRefPoints: [],
+        sessionRefPointUsage: {},
+        priorMarks: prior,
+        currentMarks: [],
+      };
+      const state = refPointsReducer(
+        initial,
+        addCurrentRefPointMark(makeMark({ id: 'live' }))
+      );
+      expect(state.priorMarks).toBe(prior);
+    });
+  });
+
+  describe('clearCurrentRefPointMarks', () => {
+    it('empties currentMarks but keeps priorMarks', () => {
+      const initial: RefPointsState = {
+        importedRefPoints: [],
+        sessionRefPointUsage: {},
+        priorMarks: [makeMark({ id: 'prior' })],
+        currentMarks: [makeMark({ id: 'a' }), makeMark({ id: 'b' })],
+      };
+      const state = refPointsReducer(initial, clearCurrentRefPointMarks());
+      expect(state.currentMarks).toEqual([]);
+      expect(state.priorMarks).toEqual(initial.priorMarks);
     });
   });
 });

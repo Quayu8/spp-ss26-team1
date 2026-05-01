@@ -31,9 +31,11 @@ import {
   type RefPointDefinition,
 } from 'gps-plus-slam-app-framework/storage/ref-point-loader';
 import { recoverRefPointDefinitionsFromZips } from 'gps-plus-slam-app-framework/storage/ref-point-recovery';
-import { refPointVisualizer } from 'gps-plus-slam-app-framework/visualization/reference-points';
 import { createLogger } from 'gps-plus-slam-app-framework/utils/logger';
-import { setCurrentScenarioName } from 'gps-plus-slam-app-framework/state/store';
+import {
+  setCurrentScenarioName,
+  setPriorRefPointMarks,
+} from 'gps-plus-slam-app-framework/state/store';
 import type { RecorderStore } from 'gps-plus-slam-app-framework/state/store';
 
 const log = createLogger('FolderManager');
@@ -316,8 +318,12 @@ export function createFolderManager(deps: FolderManagerDeps): FolderManager {
 
     const allObservations = flattenRefPointsToMarks(refPointDefs);
 
-    // 3D display (all individual observations as green spheres)
-    refPointVisualizer.displayPriorRefPoints(allObservations);
+    // 3D display (all individual observations as green spheres) — driven by
+    // store subscription (Finding 5; see
+    // 2026-04-30-refpoint-marks-into-redux-plan.md). The visualizer was
+    // previously called directly here; it is now a subscription consumer
+    // bound via wireStoreSubscribers in the recording / replay paths.
+    deps.getStore().dispatch(setPriorRefPointMarks(allObservations));
 
     // Compute averaged GPS per ref point ID for H3 + 2D map
     const averaged = averageGpsPerRefPoint(refPointDefs);

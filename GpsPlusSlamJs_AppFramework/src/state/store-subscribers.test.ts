@@ -17,6 +17,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import type { LatLong, Matrix4, Vector3, Quaternion } from 'gps-plus-slam-js';
 import type { CombinedRootState } from './store';
+import type { RefPointMark } from '../storage/ref-point-loader';
 import {
   wireStoreSubscribers,
   type StoreSubscriberDeps,
@@ -31,15 +32,22 @@ import {
 function makeState(
   overrides: {
     gpsData?: CombinedRootState['gpsData'];
+    refPoints?: CombinedRootState['refPoints'];
   } = {}
 ): CombinedRootState {
   return {
     gpsData: overrides.gpsData ?? null,
-    // Subscriber logic only reads gpsData, but CombinedRootState also has these:
+    // Subscriber logic only reads gpsData + refPoints; CombinedRootState
+    // also has these other slices, faked as empty objects.
     gpsElements: {} as CombinedRootState['gpsElements'],
     arElements: {} as CombinedRootState['arElements'],
     recorder: {} as CombinedRootState['recorder'],
-    refPoints: {} as CombinedRootState['refPoints'],
+    refPoints: overrides.refPoints ?? {
+      importedRefPoints: [],
+      sessionRefPointUsage: {},
+      priorMarks: [],
+      currentMarks: [],
+    },
     routing: {} as CombinedRootState['routing'],
   };
 }
@@ -1969,6 +1977,179 @@ describe('wireStoreSubscribers', () => {
           })
         );
       }).not.toThrow();
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // RefPoint visualizer subscription (Finding 5).
+  // Why these tests matter: the visualizer was inverted from imperative
+  // target to subscription consumer. Any code path that ends up dispatching
+  // a mark must drive 3D rendering via the slice — no caller should still
+  // be reaching into the visualizer directly. These tests lock in:
+  //   - prior marks → exactly one displayPriorRefPoints call per state change
+  //   - current marks → exactly one addCurrentRefPoint call per appended mark
+  //   - clear semantics: shrinking currentMarks resets the high-water mark
+  // See docs/2026-04-30-refpoint-marks-into-redux-plan.md.
+  // -------------------------------------------------------------------------
+  describe('refPointVisualizer subscription', () => {
+    function makeRefPointDeps() {
+      return {
+        ...makeMockDeps(),
+        refPointVisualizer: {
+          displayPriorRefPoints: vi.fn(),
+          addCurrentRefPoint: vi.fn(),
+        },
+      } as StoreSubscriberDeps & {
+        refPointVisualizer: {
+          displayPriorRefPoints: ReturnType<typeof vi.fn>;
+          addCurrentRefPoint: ReturnType<typeof vi.fn>;
+        };
+      };
+    }
+
+    function makeMark(id: string, timestamp = 0): RefPointMark {
+      return {
+        id,
+        odomPosition: [0, 0, 0],
+        odomRotation: [0, 0, 0, 1],
+        gpsPosition: { lat: 50, lon: 8, altitude: 245 },
+        timestamp,
+      };
+    }
+
+    it('renders prior marks once per priorMarks change', () => {
+      const refDeps = makeRefPointDeps();
+      const mock = makeMockStore(makeState());
+      wireStoreSubscribers(mock.store, refDeps);
+
+      const marks = [makeMark('a', 1), makeMark('b', 2)];
+      mock.setState(
+        makeState({
+          refPoints: {
+            importedRefPoints: [],
+            sessionRefPointUsage: {},
+            priorMarks: marks,
+            currentMarks: [],
+          },
+        })
+      );
+
+      expect(
+        refDeps.refPointVisualizer.displayPriorRefPoints
+      ).toHaveBeenCalledTimes(1);
+      expect(
+        refDeps.refPointVisualizer.displayPriorRefPoints
+      ).toHaveBeenCalledWith(marks);
+      expect(
+        refDeps.refPointVisualizer.addCurrentRefPoint
+      ).not.toHaveBeenCalled();
+    });
+
+    it('appends one currentMark per dispatch (subscription invariant)', () => {
+      const refDeps = makeRefPointDeps();
+      const mock = makeMockStore(makeState());
+      wireStoreSubscribers(mock.store, refDeps);
+
+      const m1 = makeMark('live-1', 1);
+      const m2 = makeMark('live-2', 2);
+
+      // First append
+      mock.setState(
+        makeState({
+          refPoints: {
+            importedRefPoints: [],
+            sessionRefPointUsage: {},
+            priorMarks: [],
+            currentMarks: [m1],
+          },
+        })
+      );
+      expect(
+        refDeps.refPointVisualizer.addCurrentRefPoint
+      ).toHaveBeenCalledTimes(1);
+      expect(
+        refDeps.refPointVisualizer.addCurrentRefPoint
+      ).toHaveBeenLastCalledWith(m1);
+
+      // Second append — must add exactly one new sphere
+      mock.setState(
+        makeState({
+          refPoints: {
+            importedRefPoints: [],
+            sessionRefPointUsage: {},
+            priorMarks: [],
+            currentMarks: [m1, m2],
+          },
+        })
+      );
+      expect(
+        refDeps.refPointVisualizer.addCurrentRefPoint
+      ).toHaveBeenCalledTimes(2);
+      expect(
+        refDeps.refPointVisualizer.addCurrentRefPoint
+      ).toHaveBeenLastCalledWith(m2);
+    });
+
+    it('resets the high-water mark when currentMarks is cleared', () => {
+      const refDeps = makeRefPointDeps();
+      const mock = makeMockStore(makeState());
+      wireStoreSubscribers(mock.store, refDeps);
+
+      const m1 = makeMark('live-1', 1);
+      const m2 = makeMark('live-2', 2);
+
+      mock.setState(
+        makeState({
+          refPoints: {
+            importedRefPoints: [],
+            sessionRefPointUsage: {},
+            priorMarks: [],
+            currentMarks: [m1, m2],
+          },
+        })
+      );
+      expect(
+        refDeps.refPointVisualizer.addCurrentRefPoint
+      ).toHaveBeenCalledTimes(2);
+
+      // Clear (e.g., scenario reset)
+      mock.setState(
+        makeState({
+          refPoints: {
+            importedRefPoints: [],
+            sessionRefPointUsage: {},
+            priorMarks: [],
+            currentMarks: [],
+          },
+        })
+      );
+
+      // After clear, dispatching the same first mark again must add a sphere
+      mock.setState(
+        makeState({
+          refPoints: {
+            importedRefPoints: [],
+            sessionRefPointUsage: {},
+            priorMarks: [],
+            currentMarks: [m1],
+          },
+        })
+      );
+      expect(
+        refDeps.refPointVisualizer.addCurrentRefPoint
+      ).toHaveBeenCalledTimes(3);
+      expect(
+        refDeps.refPointVisualizer.addCurrentRefPoint
+      ).toHaveBeenLastCalledWith(m1);
+    });
+
+    it('skips wiring when refPointVisualizer dep is omitted', () => {
+      // Why: backward compatibility for callers that have not yet adopted
+      // the subscription wiring (e.g., replay paths during migration).
+      const baseDeps = makeMockDeps();
+      const mock = makeMockStore(makeState());
+      // Should not throw / bind any extra subscriptions related to marks
+      expect(() => wireStoreSubscribers(mock.store, baseDeps)).not.toThrow();
     });
   });
 });

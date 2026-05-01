@@ -26,6 +26,9 @@ export {
   setImportedRefPoints,
   incrementRefPointUsage,
   clearSessionRefPointUsage,
+  setPriorRefPointMarks,
+  addCurrentRefPointMark,
+  clearCurrentRefPointMarks,
   resetRefPointsState,
   selectCachedKnownRefPoints,
 } from './store.js';
