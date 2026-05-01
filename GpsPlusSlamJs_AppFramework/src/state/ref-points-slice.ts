@@ -14,6 +14,7 @@
 import type { PayloadAction } from '@reduxjs/toolkit';
 import { createSelector, createSlice } from '@reduxjs/toolkit';
 import type { ImportedRefPoint } from '../storage/ref-point-importer';
+import type { RefPointMark } from '../storage/ref-point-loader';
 import { gpsToH3, type KnownRefPoint } from '../ref-points/h3-ref-point';
 
 // ---------------------------------------------------------------------------
@@ -29,11 +30,28 @@ export interface RefPointsState {
    * (replaces the Map<string, number> that lived in the closure).
    */
   sessionRefPointUsage: Record<string, number>;
+  /**
+   * Per-observation ref point marks loaded from prior sessions.
+   * Drives green-sphere 3D rendering via store subscription.
+   * See docs/2026-04-30-refpoint-marks-into-redux-plan.md (Finding 5).
+   *
+   * Optional in the type for backward compatibility with test fixtures
+   * authored before this slice grew the field; the reducer always sets
+   * it, so consumers in production code can treat it as defined.
+   */
+  priorMarks?: RefPointMark[];
+  /**
+   * Per-observation ref point marks added during the current session.
+   * Drives red-sphere 3D rendering via store subscription.
+   */
+  currentMarks?: RefPointMark[];
 }
 
 const initialState: RefPointsState = {
   importedRefPoints: [],
   sessionRefPointUsage: {},
+  priorMarks: [],
+  currentMarks: [],
 };
 
 // ---------------------------------------------------------------------------
@@ -55,6 +73,22 @@ const refPointsSlice = createSlice({
     clearSessionRefPointUsage(state) {
       state.sessionRefPointUsage = {};
     },
+    setPriorRefPointMarks(state, action: PayloadAction<RefPointMark[]>) {
+      // RefPointMark contains readonly tuple types (Vector3 / Quaternion)
+      // that Immer's WritableNonArrayDraft refuses to widen. The slice
+      // never mutates these tuples in place — it replaces the array
+      // wholesale — so a structural cast is sound.
+      (state as { priorMarks?: RefPointMark[] }).priorMarks = action.payload;
+    },
+    addCurrentRefPointMark(state, action: PayloadAction<RefPointMark>) {
+      const s = state as { currentMarks?: RefPointMark[] };
+      if (!s.currentMarks) s.currentMarks = [];
+      // See setPriorRefPointMarks for rationale on the structural cast.
+      s.currentMarks.push(action.payload);
+    },
+    clearCurrentRefPointMarks(state) {
+      state.currentMarks = [];
+    },
     resetRefPointsState() {
       return initialState;
     },
@@ -65,6 +99,9 @@ export const {
   setImportedRefPoints,
   incrementRefPointUsage,
   clearSessionRefPointUsage,
+  setPriorRefPointMarks,
+  addCurrentRefPointMark,
+  clearCurrentRefPointMarks,
   resetRefPointsState,
 } = refPointsSlice.actions;
 

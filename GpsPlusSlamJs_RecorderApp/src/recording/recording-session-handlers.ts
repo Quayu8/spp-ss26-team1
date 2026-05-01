@@ -305,6 +305,7 @@ export function createRecordingSessionHandlers(
       applyAlignmentMatrix: deps.applyAlignmentMatrix,
       gpsEventVisualizer,
       mapOverlay: mapOverlayProxy,
+      refPointVisualizer,
       onNewGpsLatLng: deps.onNewGpsLatLng,
     });
 

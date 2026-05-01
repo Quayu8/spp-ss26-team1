@@ -36,6 +36,7 @@ import {
 } from 'gps-plus-slam-app-framework/ar/replay-scene';
 import { wireStoreSubscribers } from 'gps-plus-slam-app-framework/state/store-subscribers';
 import { gpsEventVisualizer } from 'gps-plus-slam-app-framework/visualization/gps-event-markers';
+import { refPointVisualizer } from 'gps-plus-slam-app-framework/visualization/reference-points';
 import {
   getArPose,
   nuePositionToWebXR,
@@ -176,6 +177,7 @@ export async function startReplayMode(
     applyAlignmentMatrix: (matrix) => alignmentLerper?.setTarget(matrix),
     gpsEventVisualizer,
     mapOverlay: mapOverlayProxy, // Proxy delegates to real overlay once set via setMapOverlay()
+    refPointVisualizer,
     // 6.2: Update arpose Object3D with recorded odom pose during replay.
     // The arpose node sits between arWorldGroup and camera; writing the
     // recorded pose here makes the camera follow the recorded trajectory

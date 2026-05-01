@@ -110,11 +110,11 @@ function createMockStore(): RecorderStore {
   };
   return {
     getState: () => state,
-    dispatch: (action: { type: string; payload?: unknown }) => {
+    dispatch: vi.fn((action: { type: string; payload?: unknown }) => {
       if (action.type === 'recorder/setCurrentScenarioName') {
         state.recorder.currentScenarioName = action.payload as string;
       }
-    },
+    }),
     subscribe: () => () => {},
   } as unknown as RecorderStore;
 }
@@ -155,10 +155,10 @@ function createDefaultDeps(
 
 function createFolderManagerWithDefaults(
   overrides: Partial<FolderManagerDeps> = {}
-): { manager: FolderManager; deps: FolderManagerDeps } {
+): { manager: FolderManager; deps: FolderManagerDeps; store: RecorderStore } {
   const deps = createDefaultDeps(overrides);
   const manager = createFolderManager(deps);
-  return { manager, deps };
+  return { manager, deps, store: deps.getStore() };
 }
 
 // ============================================================================
@@ -682,26 +682,30 @@ describe('createFolderManager', () => {
   // ========================================================================
 
   describe('loadAndDisplayRefPoints', () => {
-    it('should load, flatten, and display ref points in 3D', async () => {
-      // Why: This is a shared utility used by both recording-session-handlers and folder-manager
+    it('should load, flatten, and dispatch ref points to the store', async () => {
+      // Why: Finding 5 — visualizer is a subscription consumer; the call
+      // site dispatches setPriorRefPointMarks instead of calling the
+      // visualizer directly. See
+      // docs/2026-04-30-refpoint-marks-into-redux-plan.md.
       const { loadAllRefPoints, flattenRefPointsToMarks } =
         await import('gps-plus-slam-app-framework/storage/ref-point-loader');
-      const { refPointVisualizer } =
-        await import('gps-plus-slam-app-framework/visualization/reference-points');
       const mockDefs = [
         { name: 'pt1', observations: [{ lat: 0, lng: 0, name: 'pt1' }] },
       ] as never;
       const mockMarks = [{ lat: 0, lng: 0, name: 'pt1' }] as never;
       vi.mocked(loadAllRefPoints).mockResolvedValue(mockDefs);
       vi.mocked(flattenRefPointsToMarks).mockReturnValue(mockMarks);
-      const { manager } = createFolderManagerWithDefaults();
+      const { manager, store } = createFolderManagerWithDefaults();
 
       const result = await manager.loadAndDisplayRefPoints(mockFolderHandle);
 
       expect(loadAllRefPoints).toHaveBeenCalledWith(mockFolderHandle);
       expect(flattenRefPointsToMarks).toHaveBeenCalledWith(mockDefs);
-      expect(refPointVisualizer.displayPriorRefPoints).toHaveBeenCalledWith(
-        mockMarks
+      expect(store.dispatch).toHaveBeenCalledWith(
+        expect.objectContaining({
+          type: 'refPoints/setPriorRefPointMarks',
+          payload: mockMarks,
+        })
       );
       expect(result).toEqual({ refPointCount: 1, observationCount: 1 });
     });

@@ -179,6 +179,9 @@ vi.mock('gps-plus-slam-app-framework/state/store', async () => {
       payload,
     })),
     setImportedRefPoints: actual.setImportedRefPoints,
+    setPriorRefPointMarks: actual.setPriorRefPointMarks,
+    addCurrentRefPointMark: actual.addCurrentRefPointMark,
+    clearCurrentRefPointMarks: actual.clearCurrentRefPointMarks,
     clearSessionRefPointUsage: actual.clearSessionRefPointUsage,
     resetRefPointsState: actual.resetRefPointsState,
     selectCachedKnownRefPoints: actual.selectCachedKnownRefPoints,
@@ -2012,8 +2015,6 @@ describe('loadAndDisplayRefPoints', () => {
   it('should load, flatten, and display ref points from a scenario handle', async () => {
     const { loadAllRefPoints, flattenRefPointsToMarks } =
       await import('gps-plus-slam-app-framework/storage/ref-point-loader');
-    const { refPointVisualizer } =
-      await import('gps-plus-slam-app-framework/visualization/reference-points');
 
     const mockHandle = { name: 'TestScenario' } as FileSystemDirectoryHandle;
     const mockDefs = [{ id: 'pt-A' }, { id: 'pt-B' }];
@@ -2021,36 +2022,48 @@ describe('loadAndDisplayRefPoints', () => {
 
     vi.mocked(loadAllRefPoints).mockResolvedValue(mockDefs as never);
     vi.mocked(flattenRefPointsToMarks).mockReturnValue(mockMarks as never);
+    const dispatchSpy = vi.spyOn(mockStore, 'dispatch');
 
     const result = await loadAndDisplayRefPoints(mockHandle);
 
     expect(loadAllRefPoints).toHaveBeenCalledWith(mockHandle);
     expect(flattenRefPointsToMarks).toHaveBeenCalledWith(mockDefs);
-    const mockDisplay = vi.mocked(refPointVisualizer.displayPriorRefPoints);
-    expect(mockDisplay).toHaveBeenCalledWith(mockMarks);
+    // Finding 5 (2026-04-30 plan): visualizer is now driven by Redux. Assert
+    // that the marks are dispatched into the slice instead of calling the
+    // visualizer directly.
+    expect(dispatchSpy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: 'refPoints/setPriorRefPointMarks',
+        payload: mockMarks,
+      })
+    );
     expect(result).toEqual({ refPointCount: 2, observationCount: 3 });
   });
 
   /**
    * Why this test matters:
    * When a scenario has no ref points, the helper should return zeros
-   * and still call displayPriorRefPoints (to clear any previous markers).
+   * and still dispatch setPriorRefPointMarks (with []) so the visualizer
+   * subscription clears any previously rendered markers.
    */
   it('should return zero counts for empty scenario', async () => {
     const { loadAllRefPoints, flattenRefPointsToMarks } =
       await import('gps-plus-slam-app-framework/storage/ref-point-loader');
-    const { refPointVisualizer } =
-      await import('gps-plus-slam-app-framework/visualization/reference-points');
 
     const mockHandle = { name: 'EmptyScenario' } as FileSystemDirectoryHandle;
 
     vi.mocked(loadAllRefPoints).mockResolvedValue([]);
     vi.mocked(flattenRefPointsToMarks).mockReturnValue([]);
+    const dispatchSpy = vi.spyOn(mockStore, 'dispatch');
 
     const result = await loadAndDisplayRefPoints(mockHandle);
 
-    const mockDisplay = vi.mocked(refPointVisualizer.displayPriorRefPoints);
-    expect(mockDisplay).toHaveBeenCalledWith([]);
+    expect(dispatchSpy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: 'refPoints/setPriorRefPointMarks',
+        payload: [],
+      })
+    );
     expect(result).toEqual({ refPointCount: 0, observationCount: 0 });
   });
 });

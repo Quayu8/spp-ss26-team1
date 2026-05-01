@@ -35,11 +35,11 @@ import {
   incrementRefPointUsage,
   clearSessionRefPointUsage as clearSessionRefPointUsageAction,
   resetRefPointsState,
+  addCurrentRefPointMark,
   selectCachedKnownRefPoints,
   type GpsPoint,
 } from 'gps-plus-slam-app-framework/state/store';
 import { fusedGpsFromOdom } from 'gps-plus-slam-app-framework/utils/fused-path';
-import { refPointVisualizer } from 'gps-plus-slam-app-framework/visualization/reference-points';
 import { createLogger } from 'gps-plus-slam-app-framework/utils/logger';
 import {
   gpsToH3,
@@ -230,7 +230,10 @@ export function createRefPointHandlers(
       gpsPosition,
       timestamp,
     };
-    refPointVisualizer.addCurrentRefPoint(refPointMark);
+    // Finding 5: dispatch into the slice; the visualizer subscribes via
+    // wireStoreSubscribers and renders the red sphere from there.
+    // See docs/2026-04-30-refpoint-marks-into-redux-plan.md.
+    deps.getStore().dispatch(addCurrentRefPointMark(refPointMark));
   }
 
   // --- Main handler ---

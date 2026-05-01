@@ -183,6 +183,44 @@ function createMockStore(
   return store;
 }
 
+/**
+ * Extract the RefPointMark from the most recent
+ * `refPoints/addCurrentRefPointMark` action dispatched on the given store.
+ *
+ * Why: Finding 5 (2026-04-30 plan) moves visualization through Redux. The
+ * call site dispatches the mark instead of calling refPointVisualizer
+ * directly; tests that previously asserted on the visualizer's
+ * `addCurrentRefPoint` mock now assert on the dispatched action payload.
+ */
+function getDispatchedCurrentMark(store: RecorderStore): RefPointMark {
+  const dispatch = store.dispatch as unknown as ReturnType<typeof vi.fn>;
+  const calls = dispatch.mock.calls as Array<
+    [{ type: string; payload: unknown }]
+  >;
+  const match = [...calls]
+    .reverse()
+    .find(([a]) => a?.type === 'refPoints/addCurrentRefPointMark');
+  if (!match) {
+    throw new Error(
+      'Expected a refPoints/addCurrentRefPointMark action to have been dispatched'
+    );
+  }
+  return match[0].payload as RefPointMark;
+}
+
+/**
+ * Assert that at least one `refPoints/addCurrentRefPointMark` action was
+ * dispatched on the given store. Replacement for the legacy assertion
+ * `expect(mockRefPointVisualizer.addCurrentRefPoint).toHaveBeenCalled()`.
+ */
+function expectCurrentRefPointDispatched(store: RecorderStore): void {
+  const dispatch = store.dispatch as unknown as ReturnType<typeof vi.fn>;
+  const calls = dispatch.mock.calls as Array<[{ type: string }]>;
+  expect(
+    calls.some(([a]) => a?.type === 'refPoints/addCurrentRefPointMark')
+  ).toBe(true);
+}
+
 function createMockGpsPoint(overrides?: Partial<GpsPoint>): GpsPoint {
   return {
     latitude: 49.0,
@@ -617,13 +655,15 @@ describe('handleMarkRefPoint — full flow', () => {
     expect(name).toBe('bench');
   });
 
-  // Why: The ref point must be visualized in the 3D scene.
-  it('should visualize ref point in scene', async () => {
+  // Why: The ref point must be visualized in the 3D scene. After Finding 5
+  // (2026-04-30 plan) the visualization is driven by the Redux slice; the
+  // call site dispatches addCurrentRefPointMark and the visualizer is
+  // wired as a subscription consumer.
+  it('should dispatch ref point to the store for visualization', async () => {
     await handlers.handleMarkRefPoint();
 
-    expect(mockRefPointVisualizer.addCurrentRefPoint).toHaveBeenCalled();
-    const mark: RefPointMark =
-      mockRefPointVisualizer.addCurrentRefPoint.mock.calls[0][0];
+    expectCurrentRefPointDispatched(mockStore);
+    const mark = getDispatchedCurrentMark(mockStore);
     // ID is now H3 index
     expect(mark.id).toMatch(/^[0-9a-f]{15}$/);
     expect(mark.odomPosition).toEqual([1, 2, 3]);
@@ -669,7 +709,7 @@ describe('handleMarkRefPoint — full flow', () => {
 
     expect(mockSaveRefPointObservation).not.toHaveBeenCalled();
     expect(mockStore.dispatch).toHaveBeenCalled();
-    expect(mockRefPointVisualizer.addCurrentRefPoint).toHaveBeenCalled();
+    expectCurrentRefPointDispatched(mockStore);
   });
 });
 
@@ -1043,8 +1083,7 @@ describe('handleMarkRefPoint — H3-based ID', () => {
 
     await handlers.handleMarkRefPoint();
 
-    const mark: RefPointMark =
-      mockRefPointVisualizer.addCurrentRefPoint.mock.calls[0][0];
+    const mark = getDispatchedCurrentMark(mockStore);
     expect(mark.id).toMatch(/^[0-9a-f]{15}$/);
     expect(mark.id).not.toBe('MyRef');
   });
@@ -1437,9 +1476,8 @@ describe('visualizeRefPoint — prefers fused GPS', () => {
 
     await handlers.handleMarkRefPoint();
 
-    expect(mockRefPointVisualizer.addCurrentRefPoint).toHaveBeenCalled();
-    const mark: RefPointMark =
-      mockRefPointVisualizer.addCurrentRefPoint.mock.calls[0][0];
+    expectCurrentRefPointDispatched(store);
+    const mark = getDispatchedCurrentMark(store);
     expect(mark.gpsPosition).toEqual({
       lat: 49.5,
       lon: 8.5,
@@ -1455,8 +1493,7 @@ describe('visualizeRefPoint — prefers fused GPS', () => {
 
     await handlers.handleMarkRefPoint();
 
-    const mark: RefPointMark =
-      mockRefPointVisualizer.addCurrentRefPoint.mock.calls[0][0];
+    const mark = getDispatchedCurrentMark(store);
     // createMockGpsPoint() raw GPS is (49.0, 8.0)
     expect(mark.gpsPosition?.lat).toBe(49.0);
     expect(mark.gpsPosition?.lon).toBe(8.0);
@@ -1680,8 +1717,9 @@ describe('handleMarkRefPoint — re-observation toast feedback', () => {
 
     // Order observers: capture call sequence across persist + toast.
     const callOrder: string[] = [];
-    mockSaveRefPointObservation.mockImplementation(async () => {
+    mockSaveRefPointObservation.mockImplementation(() => {
       callOrder.push('save');
+      return Promise.resolve();
     });
     mockShowToast.mockImplementation(() => {
       callOrder.push('toast');
