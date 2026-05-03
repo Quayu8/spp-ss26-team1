@@ -16,7 +16,7 @@
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import type { LatLong, Matrix4, Vector3, Quaternion } from 'gps-plus-slam-js';
-import type { CombinedRootState } from './store';
+import type { CombinedRootState } from './combined-root-state';
 import type { RefPointMark } from '../storage/ref-point-loader';
 import {
   wireStoreSubscribers,

@@ -1,4 +1,4 @@
-// @vitest-environment jsdom
+﻿// @vitest-environment jsdom
 /**
  * Integration tests for Issue 8: CameraFollower wiring in live AR mode (main.ts).
  *
@@ -221,7 +221,7 @@ vi.mock('gps-plus-slam-app-framework/utils/fused-path', () => ({
 vi.mock('gps-plus-slam-app-framework/utils/list-formatter', () => ({
   listFormatter: { format: vi.fn() },
 }));
-vi.mock('gps-plus-slam-app-framework/state/store', () => ({
+vi.mock('./state/recorder-store', () => ({
   createRecorderStore: vi.fn().mockReturnValue({
     dispatch: vi.fn(),
     getState: vi.fn().mockReturnValue({}),
@@ -416,7 +416,7 @@ describe('Issue 8: CameraFollower wiring in live AR', () => {
     const frameCallback = mockSetFrameCallback.mock.calls[0][0];
     expect(typeof frameCallback).toBe('function');
 
-    // Invoke the callback — it should call follower.update()
+    // Invoke the callback â€” it should call follower.update()
     (frameCallback as () => void)();
 
     expect(mockFollower.update).toHaveBeenCalledTimes(1);

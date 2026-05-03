@@ -1,14 +1,14 @@
-/**
+﻿/**
  * Ref-Point Handlers
  *
  * Encapsulates all reference-point state and event handlers, extracted from
- * main.ts (Finding #7 — main.ts decomposition, ref-point extraction).
+ * main.ts (Finding #7 â€” main.ts decomposition, ref-point extraction).
  *
  * The factory pattern allows main.ts to inject dependencies that change over
  * the app lifecycle (e.g., the active store and current session name).
  *
  * All other dependencies (file system, UI, visualization) are imported
- * directly — the same modules they were imported from in main.ts.
+ * directly â€” the same modules they were imported from in main.ts.
  */
 
 import { getCurrentArPose } from 'gps-plus-slam-app-framework/ar/webxr-session';
@@ -38,7 +38,7 @@ import {
   addCurrentRefPointMark,
   selectCachedKnownRefPoints,
   type GpsPoint,
-} from 'gps-plus-slam-app-framework/state/store';
+} from '../state/recorder-store';
 import { fusedGpsFromOdom } from 'gps-plus-slam-app-framework/utils/fused-path';
 import { createLogger } from 'gps-plus-slam-app-framework/utils/logger';
 import {
@@ -47,7 +47,7 @@ import {
 } from 'gps-plus-slam-app-framework/ref-points/h3-ref-point';
 import { webxrToNUE } from 'gps-plus-slam-app-framework/core';
 import type { Vector3, Quaternion } from 'gps-plus-slam-app-framework/core';
-import type { RecorderStore } from 'gps-plus-slam-app-framework/state/store';
+import type { RecorderStore } from '../state/recorder-store';
 
 const log = createLogger('RefPointHandlers');
 
@@ -66,7 +66,7 @@ interface NearbyRefPointInfo {
   /** Display name of the nearby ref point. */
   readonly displayName: string;
   /** True when the user's H3 cell differs from the matched ref point's cell
-   *  (i.e., in a gridDisk neighbor cell — a new ref point could be added). */
+   *  (i.e., in a gridDisk neighbor cell â€” a new ref point could be added). */
   readonly isNeighborCell: boolean;
 }
 
@@ -209,8 +209,8 @@ export function createRefPointHandlers(
     fusedGpsPoint?: { latitude: number; longitude: number; altitude?: number }
   ): void {
     // Prefer fused GPS so the red current-session sphere sits where the
-    // next session's green sphere will appear (loader also prefers fused —
-    // see 2026-04-24-refpoint-positioning-investigation.md §7).
+    // next session's green sphere will appear (loader also prefers fused â€”
+    // see 2026-04-24-refpoint-positioning-investigation.md Â§7).
     //
     // Per-field fallback (Option B, 2026-04-29 user-feedback Finding 1):
     // mirrors `flattenRefPointsToMarks` in the loader. Fused altitude may
@@ -300,7 +300,7 @@ export function createRefPointHandlers(
           Date.now() - lastMark < RE_OBSERVATION_COOLDOWN_MS
         ) {
           log.warn(
-            `Re-observation of ${refPointId} ignored — cooldown active (${RE_OBSERVATION_COOLDOWN_MS}ms)`
+            `Re-observation of ${refPointId} ignored â€” cooldown active (${RE_OBSERVATION_COOLDOWN_MS}ms)`
           );
           return;
         }
@@ -310,7 +310,7 @@ export function createRefPointHandlers(
         );
       } else {
         // New ref point: show picker for optional display name only.
-        // No suggestion list — scenario IDs are H3 hex strings (meaningless to users)
+        // No suggestion list â€” scenario IDs are H3 hex strings (meaningless to users)
         // and imported names refer to distant locations (no nearby match).
         const sessionUsage = deps.getStore().getState()
           .refPoints.sessionRefPointUsage;
@@ -395,7 +395,7 @@ export function createRefPointHandlers(
       // the single-click re-observation branch shows no picker, so the user
       // otherwise has no confirmation. Picker-driven new-ref-point flow has
       // implicit feedback via the picker UI itself, so it does NOT toast.
-      // Only fire after the OPFS write succeeds — the toast reflects the
+      // Only fire after the OPFS write succeeds â€” the toast reflects the
       // durable end state, not just the dispatch.
       if (nearbyMatch && persistOk) {
         showToast(`Re-observed "${refPointName}"`, { severity: 'info' });

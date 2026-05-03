@@ -14,7 +14,7 @@
  */
 
 import { createSelector } from '@reduxjs/toolkit';
-import type { CombinedRootState } from './store';
+import type { CombinedRootState } from './combined-root-state';
 import type { RefPointMark } from '../storage/ref-point-loader';
 import type {
   GpsPoint,

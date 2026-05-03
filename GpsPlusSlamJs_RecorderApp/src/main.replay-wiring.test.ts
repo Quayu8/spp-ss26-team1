@@ -1,15 +1,15 @@
-// @vitest-environment jsdom
+﻿// @vitest-environment jsdom
 /**
  * Integration tests for the replay mode wiring in main.ts.
  *
  * Why these tests matter:
- * These tests verify the glue layer — the replay handler functions that connect
+ * These tests verify the glue layer â€” the replay handler functions that connect
  * the replay UI, session browser, and replay orchestrator. Without these tests,
  * the wiring correctness would only be verifiable via manual E2E testing.
  *
  * Key acceptance criteria tested:
  * - R6: Replay store assigned to module-level store variable
- * - R8: Session browser → zip bytes → startReplayMode data flow
+ * - R8: Session browser â†’ zip bytes â†’ startReplayMode data flow
  * - Replay scenario/session selection populates UI correctly
  */
 
@@ -175,7 +175,7 @@ vi.mock('gps-plus-slam-app-framework/storage/file-system-utils', () => ({
 vi.mock('gps-plus-slam-app-framework/utils/fused-path', () => ({
   computeFusedPath: vi.fn(),
 }));
-vi.mock('gps-plus-slam-app-framework/state/store', () => ({
+vi.mock('./state/recorder-store', () => ({
   createRecorderStore: vi.fn().mockReturnValue({
     dispatch: vi.fn(),
     getState: vi.fn().mockReturnValue({}),

@@ -11,7 +11,7 @@
  */
 
 import { describe, it, expect, vi } from 'vitest';
-import type { CombinedRootState } from './store';
+import type { CombinedRootState } from './combined-root-state';
 import {
   subscribeToSelector,
   type SubscribableStore,

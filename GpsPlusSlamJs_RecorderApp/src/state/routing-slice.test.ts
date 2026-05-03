@@ -7,7 +7,7 @@
  * preventing time-travel debugging. This slice makes the current screen
  * part of the Redux store, the single source of truth.
  *
- * @see docs/2026-04-06-spa-architecture-audit.md — Bug 2
+ * @see GpsPlusSlamJs_Docs/docs/2026-04-06-spa-architecture-audit.md — Bug 2
  */
 
 import { describe, it, expect } from 'vitest';

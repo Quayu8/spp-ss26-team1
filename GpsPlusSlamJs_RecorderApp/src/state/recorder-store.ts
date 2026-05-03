@@ -1,0 +1,152 @@
+/**
+ * Recorder Store — composable store for the recorder app.
+ *
+ * Wraps the framework's `createSlamAppStore` factory and supplies the
+ * recorder-specific extras (routing, refPoints — until refPoints moves
+ * out in Iter 3, scenario in Iter 1D). The framework no longer ships a
+ * `createRecorderStore`; that wrapper now lives in the consuming app.
+ *
+ * Re-exports everything the recorder app previously imported from
+ * `gps-plus-slam-app-framework/state/store` so consumer call sites only
+ * need a path swap, not a per-symbol audit.
+ *
+ * Iter 1 of the [AppFramework / RecorderApp boundary migration](../../../../gps-plus-slam/GpsPlusSlamJs_Docs/docs/2026-05-03-appframework-vs-recorderapp-boundary-analysis.md).
+ */
+
+import { type RootState as LibraryRootState } from 'gps-plus-slam-js';
+import {
+  createSlamAppStore,
+  type SlamAppStore,
+} from 'gps-plus-slam-app-framework/state/create-slam-app-store';
+import {
+  refPointsReducer,
+  type RefPointsState,
+} from 'gps-plus-slam-app-framework/state';
+import type { RecorderState } from 'gps-plus-slam-app-framework/state/recorder-slice';
+import type { StorageBackend } from 'gps-plus-slam-app-framework/storage/storage-backend';
+import { OpfsStorageBackend } from 'gps-plus-slam-app-framework/storage/opfs-storage-backend';
+import type { SessionMetadata as OpfsSessionMetadata } from 'gps-plus-slam-app-framework/storage/opfs-storage';
+import { routingReducer, type RoutingState } from './routing-slice';
+
+// --- Re-exports for backwards compatibility with consumers that previously
+// imported these from `gps-plus-slam-app-framework/state/store`. The framework
+// still owns the underlying definitions; this module just makes the recorder
+// import surface stable while pieces migrate. ---
+
+export {
+  type RecorderState,
+  type SessionMetadata,
+  startSession,
+  endSession,
+  recordDepthSample,
+  recordWriteFailure,
+  setCurrentScenarioName,
+} from 'gps-plus-slam-app-framework/state/recorder-slice';
+
+export {
+  setZeroPos,
+  recordGpsEvent,
+  add2dImage,
+  markReferencePoint,
+  calcRelativeCoordsInMeters,
+} from 'gps-plus-slam-js';
+
+export type {
+  LatLong,
+  GpsPoint,
+  RawGpsPoint,
+  RawDeviceOrientation,
+  RecordGpsEventPayload,
+  MarkReferencePointPayload,
+} from 'gps-plus-slam-js';
+
+export { type RefPointMark } from 'gps-plus-slam-app-framework/storage/ref-point-loader';
+export type {
+  DepthPoint,
+  DepthSample,
+} from 'gps-plus-slam-app-framework/types/ar-types';
+
+export {
+  setImportedRefPoints,
+  incrementRefPointUsage,
+  clearSessionRefPointUsage,
+  setPriorRefPointMarks,
+  addCurrentRefPointMark,
+  clearCurrentRefPointMarks,
+  resetRefPointsState,
+  selectCachedKnownRefPoints,
+  type RefPointsState,
+} from 'gps-plus-slam-app-framework/state';
+
+export type { RecordingOptions } from 'gps-plus-slam-app-framework/state/recording-options';
+export type { StorageBackend } from 'gps-plus-slam-app-framework/storage/storage-backend';
+export type { SessionMetadata as OpfsSessionMetadata } from 'gps-plus-slam-app-framework/storage/opfs-storage';
+
+// --- Recorder-owned types ---
+
+/**
+ * Combined root state: library state + recorder slices (recorder, refPoints,
+ * routing). Composed by `createRecorderStore`.
+ */
+export interface CombinedRootState extends LibraryRootState {
+  recorder: RecorderState;
+  refPoints: RefPointsState;
+  routing: RoutingState;
+}
+
+/**
+ * Recorder store handle. Same shape as before the Iter 1 split — the
+ * framework's `SlamAppStore` already provides this surface; we just narrow
+ * the state type to `CombinedRootState` for recorder consumers.
+ */
+export interface RecorderStore {
+  getState: () => CombinedRootState;
+  dispatch: SlamAppStore['dispatch'];
+  subscribe: (listener: () => void) => () => void;
+  writeFrame: (blob: Blob, index: number) => Promise<void>;
+  writeSessionMetadata: (metadata: OpfsSessionMetadata) => Promise<void>;
+}
+
+export interface RecorderStoreOptions {
+  /** Show toast / surface errors on persistence failures. */
+  onWriteFailure?: (error: Error) => void;
+  /** Override default OPFS backend (tests / replay → NullStorageBackend). */
+  storageBackend?: StorageBackend;
+  /** Disable RTK dev-only middleware in high-throughput replay scenarios. */
+  enableDevChecks?: boolean;
+  /** Override the bundled community license key. */
+  licenseKey?: string;
+}
+
+/**
+ * Construct the recorder store. Delegates to the framework factory and
+ * supplies recorder-only slices via `extraReducers`.
+ */
+export function createRecorderStore(
+  options: RecorderStoreOptions = {}
+): RecorderStore {
+  const storageBackend: StorageBackend =
+    options.storageBackend ?? new OpfsStorageBackend();
+
+  const store = createSlamAppStore({
+    storageBackend,
+    onWriteFailure: options.onWriteFailure,
+    enableDevChecks: options.enableDevChecks,
+    licenseKey: options.licenseKey,
+    extraReducers: {
+      refPoints: refPointsReducer,
+      routing: routingReducer,
+    },
+  });
+
+  return {
+    getState: () => store.getState() as CombinedRootState,
+    dispatch: store.dispatch,
+    subscribe: store.subscribe,
+    writeFrame: store.writeFrame,
+    writeSessionMetadata: store.writeSessionMetadata,
+  };
+}
+
+export type RootState = CombinedRootState;
+export type AppDispatch = RecorderStore['dispatch'];

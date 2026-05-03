@@ -5,7 +5,7 @@
  *
  * RECOMMENDED: Import from subpaths for clarity and to avoid name conflicts:
  *   import { initAR } from 'gps-plus-slam-app-framework/ar';
- *   import { createRecorderStore } from 'gps-plus-slam-app-framework/state';
+ *   import { createSlamAppStore } from 'gps-plus-slam-app-framework/state';
  *
  * This root barrel re-exports conflict-free names for convenience.
  * Names that collide across submodules (StorageBackend, SessionMetadata,
@@ -24,12 +24,6 @@ export * from './types/index.js';
 // State: omit types also exported by storage/types (StorageBackend, DepthPoint, etc.)
 export {
   type RecorderState,
-  type CombinedRootState,
-  type RecorderStore,
-  type RecorderStoreOptions,
-  type RootState,
-  type AppDispatch,
-  createRecorderStore,
   startSession,
   endSession,
   recordDepthSample,
@@ -72,9 +66,13 @@ export {
   cloneRecordingOptions,
   replayRecording,
   refPointsReducer,
-  navigateTo,
-  type RoutingState,
-  type AppScreen,
+  recorderReducer,
+  createSlamAppStore,
+  type SlamAppStore,
+  type SlamAppStoreOptions,
+  type SlamAppRootState,
+  type SlamAppCombinedState,
+  type SlamAppMiddleware,
   DEFAULT_MAX_DELAY_MS,
   type ReplayState,
   type ProgressCallback,
@@ -145,5 +143,5 @@ export {
 // Visualization: export from map-overlay (not leaflet-map-overlay) for DEFAULT_ZOOM etc.
 export * from './visualization/index.js';
 
-// Licensing: bundled community license key (default for createRecorderStore)
+// Licensing: bundled community license key (default for createSlamAppStore)
 export * from './licensing/index.js';

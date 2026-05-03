@@ -12,7 +12,7 @@
 
 import * as THREE from 'three';
 import { getScene } from '../ar/webxr-session';
-import type { RefPointMark } from '../state/store';
+import type { RefPointMark } from '../storage/ref-point-loader';
 import type { LatLong } from 'gps-plus-slam-js';
 import { calcRelativeCoordsInMeters } from 'gps-plus-slam-js';
 import { createLogger } from '../utils/logger';

@@ -1,13 +1,15 @@
 /**
  * Routing Slice — Redux state for current application screen.
  *
- * Bug 2 fix (SPA architecture audit): Moves `currentScreen` from a
- * module-level variable in navigation.ts into Redux, making it the
- * single source of truth for screen state. This enables time-travel
- * debugging and prevents desync between navigation state and Redux.
+ * Recorder-only routing state. The framework intentionally does not impose a
+ * routing pattern; apps that don't need a `'setup' → 'ar' → 'recording' →
+ * 'summary'` flow can compose their own slice (or skip Redux routing
+ * entirely) via `createSlamAppStore`'s `extraReducers` seam.
  *
- * @see docs/2026-04-06-spa-architecture-audit.md — Bug 2
- * @see docs_guides/spa-architecture-best-practices.md — §4 State-Driven Routing
+ * Moved here from the AppFramework as part of Iter 1 of the
+ * AppFramework / RecorderApp boundary migration ([plan](../../../../GpsPlusSlamJs_Docs/docs/2026-05-03-appframework-vs-recorderapp-boundary-analysis.md)).
+ *
+ * @see GpsPlusSlamJs_Docs/docs/2026-04-06-spa-architecture-audit.md — Bug 2
  */
 
 import type { PayloadAction } from '@reduxjs/toolkit';

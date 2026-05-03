@@ -1,15 +1,15 @@
-/**
+﻿/**
  * Folder Manager
  *
  * Encapsulates folder/save-location selection, scenario management, and
- * OPFS scenario caching, extracted from main.ts (Finding #7 — main.ts
+ * OPFS scenario caching, extracted from main.ts (Finding #7 â€” main.ts
  * decomposition, Step 4).
  *
  * The factory pattern allows main.ts to inject dependencies that change
  * over the app lifecycle (replay mode state, ref point handlers, etc.).
  *
  * All other dependencies (external-file-storage, session-browser, UI) are
- * imported directly — the same modules they were imported from in main.ts.
+ * imported directly â€” the same modules they were imported from in main.ts.
  */
 
 import {
@@ -35,8 +35,8 @@ import { createLogger } from 'gps-plus-slam-app-framework/utils/logger';
 import {
   setCurrentScenarioName,
   setPriorRefPointMarks,
-} from 'gps-plus-slam-app-framework/state/store';
-import type { RecorderStore } from 'gps-plus-slam-app-framework/state/store';
+} from '../state/recorder-store';
+import type { RecorderStore } from '../state/recorder-store';
 
 const log = createLogger('FolderManager');
 
@@ -54,7 +54,7 @@ interface SessionEntryLike {
 export interface FolderManagerDeps {
   /** Check if the app is in replay mode (owned by replayHandlers). */
   getIsReplayMode: () => boolean;
-  /** Cache zip→scenario mapping for replay (owned by replayHandlers). */
+  /** Cache zipâ†’scenario mapping for replay (owned by replayHandlers). */
   setReplayZipScenariosCache: (cache: Map<string, SessionEntryLike[]>) => void;
   /** Set imported ref points (owned by refPointHandlers). */
   setImportedRefPoints: (refPoints: ImportedRefPoint[]) => void;
@@ -80,7 +80,7 @@ export interface FolderManagerDeps {
   extractScenarioNamesFromZips: (
     handle: FileSystemDirectoryHandle
   ) => Promise<string[]>;
-  /** UI: discover scenario→session mappings from zip metadata. */
+  /** UI: discover scenarioâ†’session mappings from zip metadata. */
   discoverScenariosFromZipMetadata: (
     handle: FileSystemDirectoryHandle
   ) => Promise<{
@@ -154,12 +154,12 @@ export function createFolderManager(deps: FolderManagerDeps): FolderManager {
     }
 
     log.info('Opened folder for reading:', result.folderName);
-    deps.updateFolderStatus(`⏳ Scanning ${result.folderName}...`);
+    deps.updateFolderStatus(`â³ Scanning ${result.folderName}...`);
 
     const folderHandle = getReadFolderHandle();
     if (!folderHandle) {
       log.error('Folder handle not available after selection');
-      deps.updateFolderStatus('❌ Failed to access folder');
+      deps.updateFolderStatus('âŒ Failed to access folder');
       return;
     }
 
@@ -175,12 +175,12 @@ export function createFolderManager(deps: FolderManagerDeps): FolderManager {
           ...new Set([...dirScenarios, ...zipDiscovery.scenarioNames]),
         ].sort();
         deps.populateReplayScenarios(allScenarios);
-        const msg = `✅ ${result.folderName} (${allScenarios.length} scenario${allScenarios.length !== 1 ? 's' : ''})`;
+        const msg = `âœ… ${result.folderName} (${allScenarios.length} scenario${allScenarios.length !== 1 ? 's' : ''})`;
         log.info(msg);
         deps.updateFolderStatus(msg);
       } catch (err) {
         log.error('Failed to list scenarios from folder:', err);
-        deps.updateFolderStatus('❌ Failed to read scenarios');
+        deps.updateFolderStatus('âŒ Failed to read scenarios');
       }
       return;
     }
@@ -206,14 +206,14 @@ export function createFolderManager(deps: FolderManagerDeps): FolderManager {
         allScenarios.length > 0
           ? `${allScenarios.length} scenario${allScenarios.length !== 1 ? 's' : ''}`
           : '';
-      const msg = `✅ ${result.folderName}${scenarioLabel ? ` (${scenarioLabel})` : ''}`;
+      const msg = `âœ… ${result.folderName}${scenarioLabel ? ` (${scenarioLabel})` : ''}`;
       log.info(msg);
       deps.updateFolderStatus(msg);
       deps.setFolderSelected(true);
       deps.validateEnterButton();
     } catch (err) {
       log.error('Unexpected error during folder scan:', err);
-      deps.updateFolderStatus('❌ Folder scan error - see logs');
+      deps.updateFolderStatus('âŒ Folder scan error - see logs');
     }
   }
 
@@ -234,7 +234,7 @@ export function createFolderManager(deps: FolderManagerDeps): FolderManager {
     }
 
     log.info('Save location chosen:', result.fileName);
-    deps.updateSaveStatus(`✅ ${result.fileName}`);
+    deps.updateSaveStatus(`âœ… ${result.fileName}`);
     deps.setSaveLocationSelected(true);
     deps.validateEnterButton();
   }
@@ -253,7 +253,7 @@ export function createFolderManager(deps: FolderManagerDeps): FolderManager {
         const readFolder = getReadFolderHandle();
         if (readFolder) {
           log.info(
-            'Scenario not in OPFS — creating directory for recovery:',
+            'Scenario not in OPFS â€” creating directory for recovery:',
             scenarioName
           );
           handle = await ensureScenarioDirectory(scenarioName);
@@ -287,7 +287,7 @@ export function createFolderManager(deps: FolderManagerDeps): FolderManager {
     const readFolder = getReadFolderHandle();
     if (!readFolder) return [];
     try {
-      log.info('OPFS empty — recovering ref points from ZIPs...');
+      log.info('OPFS empty â€” recovering ref points from ZIPs...');
       const recovery = await recoverRefPointDefinitionsFromZips(readFolder);
       if (recovery.definitions.length > 0) {
         for (const def of recovery.definitions) {
@@ -318,7 +318,7 @@ export function createFolderManager(deps: FolderManagerDeps): FolderManager {
 
     const allObservations = flattenRefPointsToMarks(refPointDefs);
 
-    // 3D display (all individual observations as green spheres) — driven by
+    // 3D display (all individual observations as green spheres) â€” driven by
     // store subscription (Finding 5; see
     // 2026-04-30-refpoint-marks-into-redux-plan.md). The visualizer was
     // previously called directly here; it is now a subscription consumer

@@ -27,8 +27,16 @@ import {
   resetCoordinatorState,
   eulerToQuaternion,
 } from './recording-coordinator';
-import { createRecorderStore, startSession } from './store';
-import type { RecorderStore } from './store';
+import { createSlamAppStore, type SlamAppStore } from './create-slam-app-store';
+import { startSession } from './recorder-slice';
+import { refPointsReducer } from './ref-points-slice';
+import { NullStorageBackend } from '../storage/null-storage-backend';
+type RecorderStore = SlamAppStore<any>;
+const createRecorderStore = (opts?: { storageBackend?: any }) =>
+  createSlamAppStore({
+    storageBackend: opts?.storageBackend ?? new NullStorageBackend(),
+    extraReducers: { refPoints: refPointsReducer },
+  });
 import type { ARPose } from '../ar/webxr-session';
 import type { GpsPosition, RawDeviceOrientation } from '../sensors/gps';
 

@@ -1,4 +1,4 @@
-/**
+﻿/**
  * Replay Handlers Tests
  *
  * Why these tests matter:
@@ -13,9 +13,9 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import type { ReplayModeController } from './replay-mode';
 import type { SessionEntry, ScenarioSessionMap } from '../ui/session-browser';
-import type { RecorderStore } from 'gps-plus-slam-app-framework/state/store';
+import type { RecorderStore } from '../state/recorder-store';
 
-// ── Hoisted mocks ──────────────────────────────────────────────────────
+// â”€â”€ Hoisted mocks â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 const { mockStartReplayMode, mockReplayController, mockReplayStore } =
   vi.hoisted(() => {
@@ -46,7 +46,7 @@ const { mockStartReplayMode, mockReplayController, mockReplayStore } =
     return { mockStartReplayMode, mockReplayController, mockReplayStore };
   });
 
-// ── Module mocks ───────────────────────────────────────────────────────
+// â”€â”€ Module mocks â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 vi.mock('./replay-mode', () => ({
   startReplayMode: mockStartReplayMode,
@@ -152,7 +152,7 @@ vi.mock('gps-plus-slam-app-framework/utils/logger', () => ({
   }),
 }));
 
-// ── Imports (after mocks) ──────────────────────────────────────────────
+// â”€â”€ Imports (after mocks) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 import { createReplayHandlers, type ReplayHandlers } from './replay-handlers';
 import { getReadFolderHandle } from '../storage/external-file-storage';
@@ -175,9 +175,9 @@ import {
 } from 'gps-plus-slam-app-framework/ar/replay-scene';
 import type { ReplaySceneState } from 'gps-plus-slam-app-framework/ar/replay-scene';
 import type { Object3D } from 'three';
-import type { CombinedRootState } from 'gps-plus-slam-app-framework/state/store';
+import type { CombinedRootState } from '../state/recorder-store';
 
-// ── Helpers ────────────────────────────────────────────────────────────
+// â”€â”€ Helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 function createMockSessionEntry(
   filename: string,
@@ -206,7 +206,7 @@ function createMockFolderHandle(
   } as unknown as FileSystemDirectoryHandle;
 }
 
-// ── Test suites ────────────────────────────────────────────────────────
+// â”€â”€ Test suites â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 describe('createReplayHandlers', () => {
   let handlers: ReplayHandlers;
@@ -563,7 +563,7 @@ describe('handleStartReplay', () => {
     );
   });
 
-  // Why: R6 — the module-level store in main.ts must be replaced with the
+  // Why: R6 â€” the module-level store in main.ts must be replaced with the
   // replay store. This is the critical coupling: we verify the setStore
   // callback is called with the controller's store.
   it('should call setStore with the replay controller store', async () => {
@@ -642,7 +642,7 @@ describe('handleStartReplay', () => {
 
     await handlers.handleStartReplay(1);
 
-    expect(showError).toHaveBeenCalledWith('Failed to start replay — see logs');
+    expect(showError).toHaveBeenCalledWith('Failed to start replay â€” see logs');
   });
 });
 
@@ -1155,7 +1155,7 @@ describe('replay handler state management', () => {
     } as unknown as CombinedRootState);
     handlers.handleReplayMapToggle();
 
-    // Now reset — mapOverlay.dispose() should be called
+    // Now reset â€” mapOverlay.dispose() should be called
     handlers.reset();
 
     expect(mockMapOverlay.dispose).toHaveBeenCalledTimes(1);

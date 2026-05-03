@@ -25,7 +25,7 @@ import type { RefPointRecord } from '../storage/file-system';
 import type {
   DepthSample as StoreDepthSample,
   DepthPoint as StoreDepthPoint,
-} from '../state/store';
+} from 'gps-plus-slam-js';
 
 describe('AR Types', () => {
   describe('ARPose', () => {
@@ -127,9 +127,9 @@ describe('AR Types', () => {
       expect(depthSampler).toBeDefined();
     });
 
-    it('DepthPoint is re-exported from store', async () => {
-      const store = await import('../state/store');
-      expect(store).toBeDefined();
+    it('DepthPoint is re-exported from gps-plus-slam-js', async () => {
+      const lib = await import('gps-plus-slam-js');
+      expect(lib).toBeDefined();
     });
   });
 
@@ -192,10 +192,10 @@ describe('AR Types', () => {
      * end-to-end compatibility between the sampler and the store at runtime.
      */
     it('DepthSampler produces a sample compatible with the store', async () => {
-      const storeModule = await import('../state/store');
+      const recorderSlice = await import('../state/recorder-slice');
       const { DepthSampler } = await import('../ar/depth-sampler');
 
-      expect(storeModule.recordDepthSample).toBeDefined();
+      expect(recorderSlice.recordDepthSample).toBeDefined();
 
       const capturedSamples: DepthSample[] = [];
       const sampler = new DepthSampler({

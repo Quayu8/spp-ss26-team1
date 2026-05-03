@@ -9,7 +9,7 @@
 
 import { describe, it, expect, beforeAll, vi } from 'vitest';
 import { replayRecording } from './recording-replayer';
-import type { CombinedRootState } from './store';
+import type { CombinedRootState } from './combined-root-state';
 import type { RecordedAction } from '../storage/zip-reader';
 import { isIdentityMatrix4 } from 'gps-plus-slam-js';
 import {

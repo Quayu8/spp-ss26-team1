@@ -20,8 +20,15 @@ import {
   ReplayEngine,
   DEFAULT_MAX_DELAY_MS,
 } from './replay-engine';
-import { createRecorderStore } from './store';
+import { createSlamAppStore } from './create-slam-app-store';
+import { refPointsReducer } from './ref-points-slice';
 import { NullStorageBackend } from '../storage/null-storage-backend';
+
+const createRecorderStore = (opts?: { storageBackend?: any }) =>
+  createSlamAppStore({
+    storageBackend: opts?.storageBackend ?? new NullStorageBackend(),
+    extraReducers: { refPoints: refPointsReducer },
+  });
 
 // ---------------------------------------------------------------------------
 // Synthetic action fixtures — explicitly encode timestamp assumptions

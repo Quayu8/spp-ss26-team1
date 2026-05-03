@@ -1,4 +1,4 @@
-/**
+﻿/**
  * Recording Options Integration Tests
  *
  * Tests that verify recording options are properly applied
@@ -22,7 +22,7 @@ import {
   recordDepthSample,
   add2dImage,
   type RecorderStore,
-} from 'gps-plus-slam-app-framework/state/store';
+} from './recorder-store';
 
 // Mock file system to avoid actual file operations
 vi.mock('gps-plus-slam-app-framework/storage/file-system', () => ({

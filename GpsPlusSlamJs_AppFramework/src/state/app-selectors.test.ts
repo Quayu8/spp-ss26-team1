@@ -16,7 +16,7 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import type { CombinedRootState } from './store';
+import type { CombinedRootState } from './combined-root-state';
 import type { GpsModel } from 'gps-plus-slam-js';
 import {
   selectAlignmentMatrix,

@@ -50,6 +50,7 @@ const entryFiles = [
   // state/
   'src/state/index.ts',
   'src/state/app-selectors.ts',
+  'src/state/create-slam-app-store.ts',
   'src/state/persistence-middleware.ts',
   'src/state/recorder-slice.ts',
   'src/state/recording-coordinator.ts',
@@ -57,8 +58,6 @@ const entryFiles = [
   'src/state/recording-replayer.ts',
   'src/state/ref-points-slice.ts',
   'src/state/replay-engine.ts',
-  'src/state/routing-slice.ts',
-  'src/state/store.ts',
   'src/state/store-subscribers.ts',
   'src/state/subscribe-to-selector.ts',
 

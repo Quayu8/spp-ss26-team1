@@ -1,4 +1,4 @@
-/**
+﻿/**
  * Action Schema Tests
  *
  * Verifies that the Redux actions have the correct structure for replay.
@@ -28,7 +28,7 @@ import {
   type RecorderStore,
   type DepthSample,
   type MarkReferencePointPayload,
-} from 'gps-plus-slam-app-framework/state/store';
+} from './recorder-store';
 
 // Mock file-system to capture what would be written
 const writtenActions: unknown[] = [];

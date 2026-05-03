@@ -1,8 +1,8 @@
-/**
+﻿/**
  * Folder Manager Tests
  *
  * Tests for the folder-manager module extracted from main.ts
- * (Finding #7 — main.ts decomposition, Step 4).
+ * (Finding #7 â€” main.ts decomposition, Step 4).
  *
  * Tests the factory function `createFolderManager(deps)` which encapsulates:
  * - handleOpenFolder: folder picker + ref point import + scenario discovery
@@ -12,7 +12,7 @@
  * - currentScenarioName: current scenario name state
  *
  * Status display functions (updateFolderStatus / updateSaveStatus) are injected
- * dependencies — no jsdom environment is required.
+ * dependencies â€” no jsdom environment is required.
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
@@ -21,7 +21,7 @@ import {
   type FolderManagerDeps,
   type FolderManager,
 } from './folder-manager';
-import type { RecorderStore } from 'gps-plus-slam-app-framework/state/store';
+import type { RecorderStore } from '../state/recorder-store';
 
 // --- Mock all direct dependencies ---
 
@@ -229,10 +229,10 @@ describe('createFolderManager', () => {
   });
 
   // ========================================================================
-  // handleOpenFolder — recording mode
+  // handleOpenFolder â€” recording mode
   // ========================================================================
 
-  describe('handleOpenFolder — recording mode', () => {
+  describe('handleOpenFolder â€” recording mode', () => {
     beforeEach(() => {
       vi.mocked(selectReadFolder).mockResolvedValue({
         success: true,
@@ -255,7 +255,7 @@ describe('createFolderManager', () => {
     });
 
     it('should return early when user cancels folder picker', async () => {
-      // Why: User cancellation is not an error — no side effects expected
+      // Why: User cancellation is not an error â€” no side effects expected
       vi.mocked(selectReadFolder).mockResolvedValue({
         success: false,
         reason: 'cancelled',
@@ -289,7 +289,7 @@ describe('createFolderManager', () => {
       await manager.handleOpenFolder();
 
       expect(deps.updateFolderStatus).toHaveBeenCalledWith(
-        '❌ Failed to access folder'
+        'âŒ Failed to access folder'
       );
     });
 
@@ -326,7 +326,7 @@ describe('createFolderManager', () => {
       );
     });
 
-    it('should merge OPFS, folder, and zip scenarios — deduplicated and sorted', async () => {
+    it('should merge OPFS, folder, and zip scenarios â€” deduplicated and sorted', async () => {
       // Why: Dropdown must show unified, sorted, deduplicated scenario list
       const listScenarios = vi
         .fn<FolderManagerDeps['listScenariosFromFolder']>()
@@ -386,16 +386,16 @@ describe('createFolderManager', () => {
       await manager.handleOpenFolder();
 
       expect(deps.updateFolderStatus).toHaveBeenCalledWith(
-        '❌ Folder scan error - see logs'
+        'âŒ Folder scan error - see logs'
       );
     });
   });
 
   // ========================================================================
-  // handleOpenFolder — replay mode
+  // handleOpenFolder â€” replay mode
   // ========================================================================
 
-  describe('handleOpenFolder — replay mode', () => {
+  describe('handleOpenFolder â€” replay mode', () => {
     beforeEach(() => {
       vi.mocked(selectReadFolder).mockResolvedValue({
         success: true,
@@ -513,7 +513,7 @@ describe('createFolderManager', () => {
       await manager.handleOpenFolder();
 
       expect(deps.updateFolderStatus).toHaveBeenCalledWith(
-        '❌ Failed to read scenarios'
+        'âŒ Failed to read scenarios'
       );
     });
 
@@ -586,7 +586,7 @@ describe('createFolderManager', () => {
 
       await manager.handleChooseSaveLocation();
 
-      expect(deps.updateSaveStatus).toHaveBeenCalledWith('✅ recording.zip');
+      expect(deps.updateSaveStatus).toHaveBeenCalledWith('âœ… recording.zip');
       expect(deps.setSaveLocationSelected).toHaveBeenCalledWith(true);
       expect(deps.validateEnterButton).toHaveBeenCalled();
     });
@@ -683,7 +683,7 @@ describe('createFolderManager', () => {
 
   describe('loadAndDisplayRefPoints', () => {
     it('should load, flatten, and dispatch ref points to the store', async () => {
-      // Why: Finding 5 — visualizer is a subscription consumer; the call
+      // Why: Finding 5 â€” visualizer is a subscription consumer; the call
       // site dispatches setPriorRefPointMarks instead of calling the
       // visualizer directly. See
       // docs/2026-04-30-refpoint-marks-into-redux-plan.md.
@@ -800,7 +800,7 @@ describe('createFolderManager', () => {
     });
 
     it('should recover ref points from ZIPs when OPFS is empty and read folder available', async () => {
-      // Why: Problem 2 fix — when OPFS is cleared, ref points should be
+      // Why: Problem 2 fix â€” when OPFS is cleared, ref points should be
       // recovered from session ZIPs in the read folder, written to OPFS,
       // then loaded normally. This is the core OPFS recovery flow.
       const { loadAllRefPoints, writeRefPointDefinition } =
@@ -850,7 +850,7 @@ describe('createFolderManager', () => {
     });
 
     it('should NOT attempt recovery when OPFS has data', async () => {
-      // Why: Recovery should only run when OPFS is empty — unnecessary
+      // Why: Recovery should only run when OPFS is empty â€” unnecessary
       // ZIP scanning would slow down normal scenario changes.
       const { loadAllRefPoints } =
         await import('gps-plus-slam-app-framework/storage/ref-point-loader');
@@ -886,7 +886,7 @@ describe('createFolderManager', () => {
     });
 
     it('should handle recovery errors gracefully', async () => {
-      // Why: Recovery failures should not crash scenario selection —
+      // Why: Recovery failures should not crash scenario selection â€”
       // user can still record, just without prior ref points.
       const { loadAllRefPoints } =
         await import('gps-plus-slam-app-framework/storage/ref-point-loader');
@@ -907,10 +907,10 @@ describe('createFolderManager', () => {
   });
 
   // ========================================================================
-  // handleScenarioChange — OPFS recovery (Problem 2)
+  // handleScenarioChange â€” OPFS recovery (Problem 2)
   // ========================================================================
 
-  describe('handleScenarioChange — OPFS recovery', () => {
+  describe('handleScenarioChange â€” OPFS recovery', () => {
     it('should create scenario directory and proceed when OPFS scenario is missing but read folder available', async () => {
       // Why: After browser data clear, the scenario directory is gone.
       // When a read folder with ZIPs is available, we should create
@@ -931,7 +931,7 @@ describe('createFolderManager', () => {
     });
 
     it('should show error when OPFS scenario missing and no read folder', async () => {
-      // Why: Without a read folder, cannot create and recover — show error.
+      // Why: Without a read folder, cannot create and recover â€” show error.
       vi.mocked(setCurrentScenario).mockResolvedValue(null);
       vi.mocked(getReadFolderHandle).mockReturnValue(null);
 

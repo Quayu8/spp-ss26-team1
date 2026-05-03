@@ -14,7 +14,10 @@
  * @see docs/2026-02-19-replay-mode.md Issue 2 (Option D), Issue 3
  */
 
-import type { RecorderStore } from './store';
+import type { SlamAppStore } from './create-slam-app-store';
+
+/** Minimal store contract used by the replay engine: dispatches plain actions. */
+type RecorderStore = SlamAppStore<any>;
 
 // ---------------------------------------------------------------------------
 // Constants

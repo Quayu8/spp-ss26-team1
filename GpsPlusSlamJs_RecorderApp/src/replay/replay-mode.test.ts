@@ -1,16 +1,16 @@
-/**
- * Replay Mode Integration — Unit Tests
+﻿/**
+ * Replay Mode Integration â€” Unit Tests
  *
  * @vitest-environment jsdom
  *
  * Why these tests matter: They verify the orchestration that wires together
  * all replay building blocks (Iterations 1-5) into a working replay mode.
  * The individual pieces are already tested; these tests ensure the wiring
- * is correct — especially:
+ * is correct â€” especially:
  *
  * - R6: The store passed to wireStoreSubscribers is the same instance the
  *   engine dispatches to (store identity).
- * - R8: Data flow from zip bytes → loadActionsFromZip → actions array →
+ * - R8: Data flow from zip bytes â†’ loadActionsFromZip â†’ actions array â†’
  *   ReplayEngine.play().
  * - R7: Error handling wired through to UI callbacks.
  * - Lifecycle: dispose cleans up scene + engine + subscribers.
@@ -38,14 +38,14 @@ vi.mock('gps-plus-slam-app-framework/ar/replay-scene', () => ({
 
 vi.mock('gps-plus-slam-app-framework/storage/zip-reader', () => ({
   loadActionsFromZip: vi.fn(),
-  loadSessionMetadata: vi.fn().mockResolvedValue({ odomCoordVersion: 5 }), // era 5 — no migration needed
+  loadSessionMetadata: vi.fn().mockResolvedValue({ odomCoordVersion: 5 }), // era 5 â€” no migration needed
 }));
 
 vi.mock('gps-plus-slam-app-framework/state/store-subscribers', () => ({
   wireStoreSubscribers: vi.fn(() => vi.fn()), // returns unsubscribe fn
 }));
 
-vi.mock('gps-plus-slam-app-framework/state/store', () => ({
+vi.mock('../state/recorder-store', () => ({
   createRecorderStore: vi.fn(() => ({
     getState: vi.fn(() => ({
       gpsData: null,
@@ -75,7 +75,7 @@ vi.mock('gps-plus-slam-app-framework/ar/webxr-session', () => ({
 import { startReplayMode } from './replay-mode.js';
 import { loadActionsFromZip } from 'gps-plus-slam-app-framework/storage/zip-reader';
 import { wireStoreSubscribers } from 'gps-plus-slam-app-framework/state/store-subscribers';
-import { createRecorderStore } from 'gps-plus-slam-app-framework/state/store';
+import { createRecorderStore } from '../state/recorder-store';
 import {
   initReplayScene,
   disposeReplayScene,
@@ -151,7 +151,7 @@ describe('replay-mode', () => {
   // --- Data flow (R8) ---
 
   it('loads actions from zip data and creates a NullStorageBackend store', async () => {
-    // Why (R8): The zip → actions → store data flow must be wired correctly.
+    // Why (R8): The zip â†’ actions â†’ store data flow must be wired correctly.
     const config = makeConfig();
     await startReplayMode(fakeZipData, config);
 
@@ -324,7 +324,7 @@ describe('replay-mode', () => {
   // --- Play dispatches actions to the store ---
 
   it('play() dispatches loaded actions to the store via the engine', async () => {
-    // Why: The core contract — replaying means dispatching recorded actions.
+    // Why: The core contract â€” replaying means dispatching recorded actions.
     const config = makeConfig();
     const controller = await startReplayMode(fakeZipData, config);
 
@@ -350,7 +350,7 @@ describe('replay-mode', () => {
     await vi.runAllTimersAsync();
 
     expect(onProgress).toHaveBeenCalled();
-    // Last call should be (3, 3) — all actions dispatched
+    // Last call should be (3, 3) â€” all actions dispatched
     expect(onProgress).toHaveBeenLastCalledWith(3, 3);
   });
 
@@ -421,7 +421,7 @@ describe('replay-mode', () => {
     // Pause
     controller.pause();
 
-    // Advance time — no more dispatches
+    // Advance time â€” no more dispatches
     await vi.advanceTimersByTimeAsync(10_000);
     expect(dispatchSpy).toHaveBeenCalledTimes(1);
 
@@ -440,7 +440,7 @@ describe('replay-mode', () => {
     const config = makeConfig();
     const controller = await startReplayMode(fakeZipData, config);
 
-    // Change speed before play — should not throw
+    // Change speed before play â€” should not throw
     controller.setSpeed(10);
 
     const engine = controller.getEngine();

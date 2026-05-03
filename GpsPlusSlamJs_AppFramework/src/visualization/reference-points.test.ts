@@ -4,7 +4,7 @@
 
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { RefPointVisualizer } from './reference-points';
-import type { RefPointMark } from '../state/store';
+import type { RefPointMark } from '../storage/ref-point-loader';
 import type { LatLong } from 'gps-plus-slam-js';
 import * as THREE from 'three';
 

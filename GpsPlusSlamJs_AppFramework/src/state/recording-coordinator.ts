@@ -16,12 +16,9 @@
  * and formatted correctly for the library's alignment algorithm.
  */
 
-import type {
-  RecorderStore,
-  LatLong,
-  RecordGpsEventPayload,
-} from '../state/store';
-import { recordGpsEvent, setZeroPos } from '../state/store';
+import type { SlamAppStore } from './create-slam-app-store';
+import type { LatLong, RecordGpsEventPayload } from 'gps-plus-slam-js';
+import { recordGpsEvent, setZeroPos } from 'gps-plus-slam-js';
 import type { GpsPosition, RawDeviceOrientation } from '../sensors/gps';
 import { createLogger } from '../utils/logger';
 
@@ -38,7 +35,7 @@ let gpsEventCounter = 0;
  */
 export interface RecordingCoordinatorConfig {
   /** Redux store to dispatch actions to */
-  store: RecorderStore;
+  store: SlamAppStore<any>;
   /** Function to get current AR pose (from WebXR module) */
   getArPose: () => ARPose | null;
 }

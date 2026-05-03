@@ -1,15 +1,15 @@
-/**
- * Store Tests
+﻿/**
+ * Recorder Store Tests
  *
- * Tests for the combined library + recorder Redux store.
- *
- * ARCHITECTURE NOTE: See docs/architecture-ar-gps-pose-separation.md
- * and docs/issue-library-integration.md
+ * Combined library + recorder Redux store integration tests. Migrated from
+ * the framework's old `state/store.test.ts` as part of Iter 1 of the
+ * AppFramework / RecorderApp boundary migration â€” the recorder now owns
+ * `createRecorderStore`, so its tests live alongside it.
  *
  * Tests verify that:
- * 1. The library store is properly integrated
- * 2. GPS events are recorded with paired AR poses
- * 3. Library's alignment algorithm receives proper data
+ * 1. The library store is properly integrated.
+ * 2. GPS events are recorded with paired AR poses.
+ * 3. The library's alignment algorithm receives proper data.
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
@@ -22,12 +22,12 @@ import {
   recordWriteFailure,
   setCurrentScenarioName,
   type RecorderStore,
-} from './store';
+} from './recorder-store';
 import { navigateTo } from './routing-slice';
-import { NullStorageBackend } from '../storage/null-storage-backend';
+import { NullStorageBackend } from 'gps-plus-slam-app-framework/storage/null-storage-backend';
 
 // Mock the file-system module to avoid actual file operations
-vi.mock('../storage/file-system', () => ({
+vi.mock('gps-plus-slam-app-framework/storage/file-system', () => ({
   writeAction: vi.fn().mockResolvedValue(undefined),
 }));
 
@@ -91,7 +91,7 @@ describe('Recorder Store', () => {
     });
 
     // Why this test matters: Starting a new session should NOT reset the
-    // scenario name — user selects it before recording and it persists.
+    // scenario name â€” user selects it before recording and it persists.
     it('should preserve currentScenarioName across startSession', () => {
       store.dispatch(setCurrentScenarioName('Downtown'));
       store.dispatch(
@@ -144,7 +144,7 @@ describe('Recorder Store', () => {
       const state = store.getState();
       const gpsEvents = state.gpsData?.gpsEvents;
       expect(gpsEvents?.odometryPositions.length).toBe(1);
-      // Dispatched [1,2,3] (raw WebXR) → reducer applies webxrToNUE → [-3, 2, 1]
+      // Dispatched [1,2,3] (raw WebXR) â†’ reducer applies webxrToNUE â†’ [-3, 2, 1]
       expect(gpsEvents?.odometryPositions[0]).toEqual([-3, 2, 1]);
       expect(gpsEvents?.gpsPositions.length).toBe(1);
       expect(gpsEvents?.gpsPositions[0].latitude).toBeCloseTo(48.8567);
@@ -285,7 +285,7 @@ describe('Recorder Store', () => {
      * If writeAction isn't initialized properly, it throws "No active session".
      */
     it('should persist gpsData and recorder actions when recording', async () => {
-      const { writeAction } = await import('../storage/file-system');
+      const { writeAction } = await import('gps-plus-slam-app-framework/storage/file-system');
 
       // Start session to enable persistence
       store.dispatch(
@@ -312,7 +312,7 @@ describe('Recorder Store', () => {
     });
 
     it('should NOT persist actions when not recording', async () => {
-      const { writeAction } = await import('../storage/file-system');
+      const { writeAction } = await import('gps-plus-slam-app-framework/storage/file-system');
       vi.mocked(writeAction).mockClear();
 
       // Dispatch without starting a session
@@ -329,7 +329,7 @@ describe('Recorder Store', () => {
        * storage layer's directory structure. This test ensures the store
        * passes 1-based indices to writeAction, not 0-based.
        */
-      const { writeAction } = await import('../storage/file-system');
+      const { writeAction } = await import('gps-plus-slam-app-framework/storage/file-system');
       vi.mocked(writeAction).mockClear();
 
       // Start session - this is the first persisted action
@@ -392,14 +392,14 @@ describe('Recorder Store', () => {
         2
       );
 
-      // Create a SECOND store — this must NOT affect store1's counter
+      // Create a SECOND store â€” this must NOT affect store1's counter
       const spyBackend2 = new NullStorageBackend();
       createRecorderStore({
         storageBackend: spyBackend2,
         enableDevChecks: false,
       });
 
-      // Dispatch on store1 again — index must continue at 3, not restart at 1
+      // Dispatch on store1 again â€” index must continue at 3, not restart at 1
       store1.dispatch(setZeroPos({ lat: 1, lon: 1 }));
       expect(writeSpy1).toHaveBeenLastCalledWith(
         expect.objectContaining({ type: 'gpsData/setZeroPos' }),
@@ -488,7 +488,7 @@ describe('Recorder Store', () => {
 
     it('should call onWriteFailure callback when write fails during persistence', async () => {
       // Why: UI layer needs to know about failures to show toast
-      const { writeAction } = await import('../storage/file-system');
+      const { writeAction } = await import('gps-plus-slam-app-framework/storage/file-system');
       const mockError = new Error('NoModificationAllowedError: read-only');
       vi.mocked(writeAction).mockRejectedValueOnce(mockError);
 
@@ -513,7 +513,7 @@ describe('Recorder Store', () => {
 
     it('should dispatch recordWriteFailure when write fails', async () => {
       // Why: Failed write count needs to be tracked in state for summary
-      const { writeAction } = await import('../storage/file-system');
+      const { writeAction } = await import('gps-plus-slam-app-framework/storage/file-system');
       const mockError = new Error('Write failed');
       vi.mocked(writeAction).mockRejectedValueOnce(mockError);
 
@@ -539,13 +539,13 @@ describe('Recorder Store', () => {
        * When writeAction fails, we dispatch recordWriteFailure to track the failure.
        * If recordWriteFailure itself were persisted, and that write also failed,
        * we'd get infinite recursion:
-       *   writeAction fails → recordWriteFailure → writeAction → fails → recordWriteFailure → ...
+       *   writeAction fails â†’ recordWriteFailure â†’ writeAction â†’ fails â†’ recordWriteFailure â†’ ...
        *
        * This test ensures recordWriteFailure is excluded from persistence.
        * This also enables us to use dispatch() consistently in the catch block
        * instead of manually updating state, addressing the code duplication concern.
        */
-      const { writeAction } = await import('../storage/file-system');
+      const { writeAction } = await import('gps-plus-slam-app-framework/storage/file-system');
       vi.mocked(writeAction).mockClear();
 
       store = createRecorderStore();
@@ -575,7 +575,7 @@ describe('Recorder Store', () => {
       // Why: JavaScript allows rejecting with any value (string, object, etc.)
       // UI feedback must work regardless of rejection type - without this fix,
       // non-Error rejections would skip the onWriteFailure callback entirely
-      const { writeAction } = await import('../storage/file-system');
+      const { writeAction } = await import('gps-plus-slam-app-framework/storage/file-system');
       const nonErrorRejection = 'string rejection value';
       vi.mocked(writeAction).mockRejectedValueOnce(nonErrorRejection);
 
@@ -611,7 +611,7 @@ describe('Recorder Store', () => {
      */
 
     it('should accept a storageBackend option and use it for persistence', () => {
-      // Why: Core F2 behavior — injected backend replaces the hard-coded import
+      // Why: Core F2 behavior â€” injected backend replaces the hard-coded import
       const mockBackend = {
         writeAction: vi.fn().mockResolvedValue(undefined),
         writeFrame: vi.fn().mockResolvedValue(undefined),
@@ -694,7 +694,7 @@ describe('Recorder Store', () => {
     });
 
     it('should not persist when using NullStorageBackend in replay mode', () => {
-      // Why: Validates the replay use case — no persistence side effects
+      // Why: Validates the replay use case â€” no persistence side effects
       const backend = new NullStorageBackend();
       const spy = vi.spyOn(backend, 'writeAction');
 
@@ -719,7 +719,7 @@ describe('Recorder Store', () => {
 
   describe('writeFrame and writeSessionMetadata delegation (A1)', () => {
     /**
-     * Why these tests matter (Finding A1 — Architecture Audit):
+     * Why these tests matter (Finding A1 â€” Architecture Audit):
      * main.ts imports writeFrame/writeSessionMetadata directly from file-system.ts,
      * bypassing the StorageBackend abstraction. This means NullStorageBackend is
      * ineffective for frame/metadata writes during replay/testing.
@@ -778,7 +778,7 @@ describe('Recorder Store', () => {
       expect(mockBackend.writeSessionMetadata).toHaveBeenCalledWith(metadata);
     });
 
-    it('should use NullStorageBackend for writeFrame in replay mode — no side effects', async () => {
+    it('should use NullStorageBackend for writeFrame in replay mode â€” no side effects', async () => {
       // Why: In replay mode, frame writes must be silently suppressed.
       // Before A1 fix, main.ts called file-system.ts directly, ignoring NullStorageBackend.
       const backend = new NullStorageBackend();
@@ -805,7 +805,7 @@ describe('Recorder Store', () => {
     });
   });
 
-  describe('Routing State (Bug 2 — SPA audit)', () => {
+  describe('Routing State (Bug 2 â€” SPA audit)', () => {
     // Why: Bug 2 requires currentScreen to live in Redux, not a module
     // variable. The store must include routing state and handle routing/
     // prefixed actions.

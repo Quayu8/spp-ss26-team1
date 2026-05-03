@@ -38,10 +38,12 @@
     "node": ">=20.19.0"
   },
   "dependencies": {
+    "@reduxjs/toolkit": "^2.11.2",
     "@sentry/browser": "^10.49.0",
     "@types/leaflet": "^1.9.21",
     "@zip.js/zip.js": "^2.8.26",
     "gps-plus-slam-app-framework": "workspace:*",
+    "gps-plus-slam-js": "^1.0.4",
     "h3-js": "^4.4.0",
     "leaflet": "^1.9.4",
     "three": "^0.184.0"

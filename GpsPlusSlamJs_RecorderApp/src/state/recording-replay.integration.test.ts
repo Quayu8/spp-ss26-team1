@@ -1,7 +1,7 @@
-/**
+﻿/**
  * Recording Replay Integration Test
  *
- * Tests the full produce→consume round-trip: actions are written through
+ * Tests the full produceâ†’consume round-trip: actions are written through
  * the OPFS pipeline, exported as a zip, then loaded and replayed into
  * Redux stores. Validates that every action, frame, and metadata field
  * survives the round-trip intact.
@@ -29,7 +29,7 @@ import { NullStorageBackend } from 'gps-plus-slam-app-framework/storage/null-sto
 import {
   createRecorderStore,
   type CombinedRootState,
-} from 'gps-plus-slam-app-framework/state/store';
+} from './recorder-store';
 import {
   createGpsSlamStore,
   isIdentityMatrix4,
@@ -109,7 +109,7 @@ describe('Recording Replay Integration', () => {
 
     it('session.json is present in the produced zip', async () => {
       // Why: the round-trip helper writes session metadata (post-F2-fix behavior);
-      // this validates that the produce→consume path includes session.json.
+      // this validates that the produceâ†’consume path includes session.json.
       // The framework's SessionMetadata now carries the recorder's scenario name
       // in the opaque `contextTag` field.
       const metadata = await loadSessionMetadata(zipData);
@@ -213,7 +213,7 @@ describe('Recording Replay Integration', () => {
 
     it('add2dImage actions before setZeroPos are silently dropped', () => {
       // Why: add2dImage dispatched before setZeroPos initializes state
-      // should be no-ops — the reducer skips them (state is null)
+      // should be no-ops â€” the reducer skips them (state is null)
       const gpsActions = actions.filter((a) => a.type.startsWith('gpsData/'));
       const setZeroIdx = gpsActions.findIndex(
         (a) => a.type === 'gpsData/setZeroPos'
