@@ -3,7 +3,10 @@
  */
 
 // --- storage-backend ---
-export { type StorageBackend, type CreateSessionResult } from './storage-backend.js';
+export {
+  type StorageBackend,
+  type CreateSessionResult,
+} from './storage-backend.js';
 
 // --- null-storage-backend ---
 export { NullStorageBackend } from './null-storage-backend.js';

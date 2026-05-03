@@ -271,9 +271,7 @@ export async function startSession(
  * When scenarioName is provided, lists sessions under that scenario.
  * Otherwise lists flat sessions.
  */
-export async function listSessions(
-  scenarioName?: string
-): Promise<string[]> {
+export async function listSessions(scenarioName?: string): Promise<string[]> {
   if (scenarioName) {
     const dir = await ensureScenariosDir();
     if (!dir) return [];

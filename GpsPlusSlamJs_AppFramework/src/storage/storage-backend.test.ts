@@ -76,7 +76,9 @@ describe('NullStorageBackend', () => {
     // so wrapping backends (e.g. ScenarioWrappingStorageBackend) can intercept it.
     // NullStorageBackend must satisfy the contract with a plausible no-op result.
     const backend: StorageBackend = new NullStorageBackend();
-    const result = await backend.createSession(new Date('2026-05-03T12:00:00Z'));
+    const result = await backend.createSession(
+      new Date('2026-05-03T12:00:00Z')
+    );
     expect(result).toHaveProperty('sessionName');
     expect(typeof result.sessionName).toBe('string');
     expect(result.sessionName.length).toBeGreaterThan(0);
@@ -206,7 +208,9 @@ describe('OpfsStorageBackend', () => {
     });
     const backend = new OpfsStorageBackend();
 
-    const result = await backend.createSession(new Date('2026-05-03T12:00:00Z'));
+    const result = await backend.createSession(
+      new Date('2026-05-03T12:00:00Z')
+    );
 
     expect(startSession).toHaveBeenCalled();
     expect(result.sessionName).toBe('recording-2026-05-03_12-00-00utc');
