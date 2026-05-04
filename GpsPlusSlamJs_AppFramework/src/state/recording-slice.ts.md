@@ -6,11 +6,11 @@ Redux Toolkit slice for recorder session management. Extracted from inline code 
 
 ## Public API
 
-| Export               | Kind           | Description                                                                           |
-| -------------------- | -------------- | ------------------------------------------------------------------------------------- |
-| `RecordingState`      | Type           | Shape of the `recorder` state slice                                                   |
-| `SessionMetadata`    | Type           | Session metadata: scenario name, session name, start time, etc.                       |
-| `recordingReducer`    | Reducer        | RTK slice reducer for `recorder/*` actions                                            |
+| Export               | Kind           | Description                                                                             |
+| -------------------- | -------------- | --------------------------------------------------------------------------------------- |
+| `RecordingState`     | Type           | Shape of the `recorder` state slice                                                     |
+| `SessionMetadata`    | Type           | Session metadata: scenario name, session name, start time, etc.                         |
+| `recordingReducer`   | Reducer        | RTK slice reducer for `recorder/*` actions                                              |
 | `startSession`       | Action creator | `recorder/startSession` â€” sets `isRecording = true`, stores metadata, resets counters |
 | `endSession`         | Action creator | `recorder/endSession` â€” sets `isRecording = false`                                    |
 | `recordDepthSample`  | Action creator | `recorder/recordDepthSample` â€” no state mutation; persisted for replay                |

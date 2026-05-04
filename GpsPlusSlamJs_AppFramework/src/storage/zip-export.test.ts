@@ -370,7 +370,6 @@ describe('zip-export', () => {
     });
   });
 
-
   describe('downloadZip', () => {
     it('creates download link with correct filename', async () => {
       // Why: User should get a meaningful filename

@@ -122,6 +122,16 @@ export class LeafletMapOverlay {
   private rawGpsPoints: L.LatLngExpression[] = [];
   private fusedPoints: L.LatLngExpression[] = [];
   private snapshotPoints: L.LatLngExpression[] = [];
+  // Generic named markers (e.g., recorder ref-point markers). Buffered so
+  // entries added before `show()` are still rendered when the Leaflet map
+  // is created. `isPrior` selects color + label decoration.
+  private namedMarkers: Array<{
+    lat: number;
+    lng: number;
+    name: string;
+    isPrior: boolean;
+    marker: L.Marker | null;
+  }> = [];
 
   // Leaflet overlay layers
   private userMarker: L.Marker | null = null;
@@ -253,6 +263,46 @@ export class LeafletMapOverlay {
   }
 
   // -------------------------------------------------------------------------
+  // Generic named markers (generic, app-defined: e.g., recorder ref-points)
+  // -------------------------------------------------------------------------
+
+  /** Add a "current" named marker (red). Buffered if map is not yet shown. */
+  addCurrentMarker(lat: number, lon: number, name: string): void {
+    const marker = this.leafletMap
+      ? this.createNamedMarker(lat, lon, name, false)
+      : null;
+    this.namedMarkers.push({ lat, lng: lon, name, isPrior: false, marker });
+  }
+
+  /** Add a "prior" named marker (green, decorated). Buffered if not shown. */
+  addPriorMarker(lat: number, lon: number, name: string): void {
+    const marker = this.leafletMap
+      ? this.createNamedMarker(lat, lon, name, true)
+      : null;
+    this.namedMarkers.push({ lat, lng: lon, name, isPrior: true, marker });
+  }
+
+  /** Bulk add prior markers. */
+  addPriorMarkers(
+    markers: Array<{ lat: number; lon: number; name: string }>
+  ): void {
+    for (const m of markers) {
+      this.addPriorMarker(m.lat, m.lon, m.name);
+    }
+  }
+
+  /** Remove all prior markers; current markers are unaffected. */
+  clearPriorMarkers(): void {
+    this.namedMarkers = this.namedMarkers.filter((m) => {
+      if (m.isPrior) {
+        m.marker?.remove();
+        return false;
+      }
+      return true;
+    });
+  }
+
+  // -------------------------------------------------------------------------
   // Zoom
   // -------------------------------------------------------------------------
 
@@ -319,6 +369,7 @@ export class LeafletMapOverlay {
     this.rawGpsPoints = [];
     this.fusedPoints = [];
     this.snapshotPoints = [];
+    this.namedMarkers = [];
 
     this.cssObject = null;
 
@@ -378,6 +429,10 @@ export class LeafletMapOverlay {
     this.fusedPolyline = null;
     this.snapshotPolyline?.remove();
     this.snapshotPolyline = null;
+    for (const m of this.namedMarkers) {
+      m.marker?.remove();
+      m.marker = null;
+    }
 
     // Destroy Leaflet map
     if (this.leafletMap) {
@@ -478,6 +533,13 @@ export class LeafletMapOverlay {
         opacity: 0.8,
       }).addTo(this.leafletMap);
     }
+
+    // Named markers — only create markers for entries that don't have one
+    for (const m of this.namedMarkers) {
+      if (!m.marker) {
+        m.marker = this.createNamedMarker(m.lat, m.lng, m.name, m.isPrior);
+      }
+    }
   }
 
   private updateUserMarker(): void {
@@ -497,5 +559,29 @@ export class LeafletMapOverlay {
         }),
       }).addTo(this.leafletMap);
     }
+  }
+
+  private createNamedMarker(
+    lat: number,
+    lon: number,
+    name: string,
+    isPrior: boolean
+  ): L.Marker {
+    const color = isPrior
+      ? VIS_COLORS.PRIOR_REF_POINT.css
+      : VIS_COLORS.CURRENT_REF_POINT.css;
+    const opacity = isPrior ? 'opacity:0.8;' : '';
+    const label = isPrior ? `📌 ${name} (prior)` : name;
+
+    return L.marker([lat, lon], {
+      icon: L.divIcon({
+        className: '',
+        html: `<div style="background:${color};width:12px;height:12px;border-radius:50%;border:2px solid white;${opacity}"></div>`,
+        iconSize: [12, 12],
+        iconAnchor: [6, 6],
+      }),
+    })
+      .bindPopup(label)
+      .addTo(this.leafletMap!);
   }
 }

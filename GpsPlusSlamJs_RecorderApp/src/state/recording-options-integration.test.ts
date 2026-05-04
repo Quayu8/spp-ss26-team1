@@ -106,7 +106,8 @@ describe('Recording Options Integration', () => {
         })
       );
 
-      const saved = store.getState().recording.sessionMetadata?.recordingOptions;
+      const saved =
+        store.getState().recording.sessionMetadata?.recordingOptions;
       expect(saved?.depth.intervalMs).toBe(1500);
       expect(saved?.depth.gridSize).toBe(7);
       expect(saved?.images.enabled).toBe(false);

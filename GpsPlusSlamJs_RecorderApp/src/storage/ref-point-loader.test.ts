@@ -13,7 +13,7 @@ import {
   type RefPointDefinition,
   type RefPointObservation,
 } from './ref-point-loader';
-import type { GpsPoint } from 'gps-plus-slam-js';
+import type { GpsPoint } from 'gps-plus-slam-app-framework/core';
 import {
   MockFSDirectoryHandle,
   MockFSFileHandle,

@@ -497,7 +497,7 @@ describe('handleStartRecording', () => {
       addRawGpsPoint: vi.fn(),
       addFusedPoint: vi.fn(),
       addAlignmentSnapshot: vi.fn(),
-      addRefPoint: vi.fn(),
+      addCurrentMarker: vi.fn(),
     };
     // getMapOverlay returns null initially
     const getMapOverlay = vi.fn().mockReturnValue(null);
@@ -511,7 +511,7 @@ describe('handleStartRecording', () => {
     const subscriberDeps = wireCall[1] as StoreSubscriberDeps;
     const mapProxy = subscriberDeps.mapOverlay as Required<
       NonNullable<StoreSubscriberDeps['mapOverlay']>
-    >;
+    > & { addCurrentMarker: (lat: number, lon: number, name: string) => void };
 
     // Proxy must be a non-null object (not the captured null)
     expect(mapProxy).not.toBeNull();
@@ -522,7 +522,7 @@ describe('handleStartRecording', () => {
     expect(() => mapProxy.addRawGpsPoint(50, 8)).not.toThrow();
     expect(() => mapProxy.addFusedPoint(50, 8)).not.toThrow();
     expect(() => mapProxy.addAlignmentSnapshot(50, 8)).not.toThrow();
-    expect(() => mapProxy.addRefPoint(50, 8, 'RP1')).not.toThrow();
+    expect(() => mapProxy.addCurrentMarker(50, 8, 'RP1')).not.toThrow();
 
     // Now simulate the overlay being created (user tapped map button)
     getMapOverlay.mockReturnValue(mockOverlay);
@@ -540,8 +540,8 @@ describe('handleStartRecording', () => {
     mapProxy.addAlignmentSnapshot(51.3, 9.3);
     expect(mockOverlay.addAlignmentSnapshot).toHaveBeenCalledWith(51.3, 9.3);
 
-    mapProxy.addRefPoint(51.4, 9.4, 'RP2');
-    expect(mockOverlay.addRefPoint).toHaveBeenCalledWith(51.4, 9.4, 'RP2');
+    mapProxy.addCurrentMarker(51.4, 9.4, 'RP2');
+    expect(mockOverlay.addCurrentMarker).toHaveBeenCalledWith(51.4, 9.4, 'RP2');
   });
 
   it('should create write and capture failure trackers', async () => {

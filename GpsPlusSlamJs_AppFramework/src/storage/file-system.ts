@@ -11,8 +11,6 @@
  * ScenarioWrappingStorageBackend in later iterations.
  */
 
-import type { LatLongAlt } from 'gps-plus-slam-js';
-import type { ArPoseTuples } from '../types/ar-types';
 import { createLogger } from '../utils/logger';
 import { setFileSystemState } from '../sensors/permission-checker';
 import {
@@ -152,18 +150,6 @@ async function listScenarios(): Promise<string[]> {
   }
   return scenarios;
 }
-
-/**
- * Get the scenarios root directory handle.
- * Legacy: used by ref-point loading. Will move to recorder.
- */
-function getScenariosRootHandle(): FileSystemDirectoryHandle | null {
-  return scenariosDir;
-}
-
-// ============================================================================
-// Initialization
-// ============================================================================
 
 /**
  * Initialize storage using OPFS.
@@ -325,118 +311,6 @@ export async function writeSessionMetadata(
   await opfsWriteSessionMetadata(metadata);
 }
 
-// ============================================================================
-// Ref-point helpers (legacy â€” moves to recorder in Iter 3)
-// ============================================================================
-
-interface ParsedRefPointAction {
-  type: string;
-  payload: {
-    id: string;
-    gpsPosition?: LatLongAlt;
-    arPose?: ArPoseTuples;
-  };
-}
-
-/**
- * Type guard for reference point actions.
- * Exported for testing.
- */
-export function isRefPointAction(
-  action: unknown
-): action is ParsedRefPointAction {
-  if (typeof action !== 'object' || action === null) {
-    return false;
-  }
-  const obj = action as Record<string, unknown>;
-  const payload = obj.payload;
-  return (
-    obj.type === 'recording/markRefPoint' &&
-    typeof payload === 'object' &&
-    payload !== null &&
-    !Array.isArray(payload)
-  );
-}
-
-async function parseSessionRefPoints(
-  actionsDir: FileSystemDirectoryHandle,
-  sessionName: string
-): Promise<RefPointRecord[]> {
-  const refPoints: RefPointRecord[] = [];
-
-  for await (const actionEntry of actionsDir.values()) {
-    if (actionEntry.kind !== 'file' || !actionEntry.name.endsWith('.json')) {
-      continue;
-    }
-
-    const fileHandle = await actionsDir.getFileHandle(actionEntry.name);
-    const file = await fileHandle.getFile();
-    const text = await file.text();
-
-    try {
-      const action: unknown = JSON.parse(text);
-      if (isRefPointAction(action)) {
-        refPoints.push({
-          id: action.payload.id,
-          sessionName,
-          gpsPosition: action.payload.gpsPosition,
-          arPose: action.payload.arPose,
-        });
-      }
-    } catch {
-      // Ignore malformed JSON
-    }
-  }
-
-  return refPoints;
-}
-
-/**
- * Load existing reference points from a scenario (across all sessions).
- * Legacy: uses scenario directory layout.
- */
-export async function loadScenarioRefPoints(
-  scenarioName: string
-): Promise<RefPointRecord[]> {
-  const scenRoot = getScenariosRootHandle();
-  if (!scenRoot) {
-    return [];
-  }
-
-  const refPoints: RefPointRecord[] = [];
-
-  try {
-    const scenarioHandle = await scenRoot.getDirectoryHandle(scenarioName);
-
-    for await (const sessionEntry of scenarioHandle.values()) {
-      if (sessionEntry.kind !== 'directory') {
-        continue;
-      }
-
-      const sessionHandle = await scenarioHandle.getDirectoryHandle(
-        sessionEntry.name
-      );
-
-      let actionsDir: FileSystemDirectoryHandle;
-      try {
-        actionsDir = await sessionHandle.getDirectoryHandle('actions');
-      } catch {
-        continue;
-      }
-
-      const sessionRefPoints = await parseSessionRefPoints(
-        actionsDir,
-        sessionEntry.name
-      );
-      refPoints.push(...sessionRefPoints);
-    }
-  } catch {
-    // Scenario doesn't exist yet
-  }
-
-  return refPoints;
-}
-
 /**
  * Get the current scenario handle (for loading prior sessions).
  * Legacy: uses scenario directory layout.
@@ -494,14 +368,4 @@ export async function ensureScenarioDirectory(
     log.error('Failed to create scenario directory:', err);
     return null;
   }
-}
-
-/**
- * Reference point record from prior sessions.
- */
-export interface RefPointRecord {
-  id: string;
-  sessionName: string;
-  gpsPosition?: LatLongAlt;
-  arPose?: ArPoseTuples;
 }

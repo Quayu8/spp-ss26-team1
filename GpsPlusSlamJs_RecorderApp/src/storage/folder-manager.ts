@@ -95,10 +95,10 @@ export interface FolderManagerDeps {
   updateSaveStatus: (text: string) => void;
   /** Optional map overlay for displaying prior ref points on the 2D map. */
   mapOverlay?: {
-    addPriorRefPoints: (
-      refPoints: Array<{ lat: number; lon: number; name: string }>
+    addPriorMarkers: (
+      markers: Array<{ lat: number; lon: number; name: string }>
     ) => void;
-    clearPriorRefPoints: () => void;
+    clearPriorMarkers: () => void;
   };
 }
 
@@ -342,8 +342,8 @@ export function createFolderManager(deps: FolderManagerDeps): FolderManager {
 
     // 2D map display
     if (deps.mapOverlay) {
-      deps.mapOverlay.clearPriorRefPoints();
-      deps.mapOverlay.addPriorRefPoints(
+      deps.mapOverlay.clearPriorMarkers();
+      deps.mapOverlay.addPriorMarkers(
         averaged.map((rp) => ({ lat: rp.lat, lon: rp.lon, name: rp.name }))
       );
     }

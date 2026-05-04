@@ -29,8 +29,7 @@ function makeState(
     gpsData: null,
     gpsElements: {} as CombinedRootState['gpsElements'],
     arElements: {} as CombinedRootState['arElements'],
-    recorder: {} as CombinedRootState['recorder'],
-    refPoints: {} as CombinedRootState['refPoints'],
+    recording: {} as CombinedRootState['recording'],
     ...overrides,
   };
 }

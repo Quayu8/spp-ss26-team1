@@ -39,8 +39,7 @@ function makeState(
     gpsData,
     gpsElements: {} as CombinedRootState['gpsElements'],
     arElements: {} as CombinedRootState['arElements'],
-    recorder: {} as CombinedRootState['recorder'],
-    refPoints: {} as CombinedRootState['refPoints'],
+    recording: {} as CombinedRootState['recording'],
   };
 }
 

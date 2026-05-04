@@ -88,7 +88,7 @@ export interface ReplayModeController {
       addRawGpsPoint?: (lat: number, lon: number) => void;
       addFusedPoint?: (lat: number, lon: number) => void;
       addAlignmentSnapshot?: (lat: number, lon: number) => void;
-      addRefPoint?: (lat: number, lon: number, name: string) => void;
+      addCurrentMarker?: (lat: number, lon: number, name: string) => void;
     } | null
   ): void;
   /** Dispose all resources (scene, engine, subscribers) */
@@ -146,7 +146,7 @@ export async function startReplayMode(
     addRawGpsPoint?: (lat: number, lon: number) => void;
     addFusedPoint?: (lat: number, lon: number) => void;
     addAlignmentSnapshot?: (lat: number, lon: number) => void;
-    addRefPoint?: (lat: number, lon: number, name: string) => void;
+    addCurrentMarker?: (lat: number, lon: number, name: string) => void;
   } | null = null;
   const mapOverlayProxy = {
     setGpsPosition(lat: number, lon: number): void {
@@ -161,8 +161,8 @@ export async function startReplayMode(
     addAlignmentSnapshot(lat: number, lon: number): void {
       mapOverlayTarget?.addAlignmentSnapshot?.(lat, lon);
     },
-    addRefPoint(lat: number, lon: number, name: string): void {
-      mapOverlayTarget?.addRefPoint?.(lat, lon, name);
+    addCurrentMarker(lat: number, lon: number, name: string): void {
+      mapOverlayTarget?.addCurrentMarker?.(lat, lon, name);
     },
   };
 
@@ -211,7 +211,10 @@ export async function startReplayMode(
       };
     })(),
   });
-  const unsubscribeRefPoints = wireRefPointSubscribers(store, refPointVisualizer);
+  const unsubscribeRefPoints = wireRefPointSubscribers(
+    store,
+    refPointVisualizer
+  );
 
   // Create and configure the replay engine
   const engine = new ReplayEngine();
@@ -263,7 +266,7 @@ export async function startReplayMode(
         addRawGpsPoint?: (lat: number, lon: number) => void;
         addFusedPoint?: (lat: number, lon: number) => void;
         addAlignmentSnapshot?: (lat: number, lon: number) => void;
-        addRefPoint?: (lat: number, lon: number, name: string) => void;
+        addCurrentMarker?: (lat: number, lon: number, name: string) => void;
       } | null
     ): void {
       mapOverlayTarget = overlay;

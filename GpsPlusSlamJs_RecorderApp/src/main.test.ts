@@ -37,7 +37,7 @@ const {
         }>;
       };
     };
-    recorder?: {
+    recording?: {
       sessionMetadata?: {
         scenarioName?: string;
         sessionName?: string;
@@ -1413,7 +1413,7 @@ describe('Session Metadata Persistence (F1)', () => {
     expect(mockWriteSessionMetadata).toHaveBeenCalledTimes(1);
     const metadata = mockWriteSessionMetadata.mock.calls[0][0] as {
       version: number;
-      scenarioName: string;
+      contextTag?: string;
       startedAt: string;
       endedAt: string;
       actionCount: number;
@@ -1423,7 +1423,7 @@ describe('Session Metadata Persistence (F1)', () => {
 
     // Must have version field for forward compatibility
     expect(metadata.version).toBe(1);
-    // Must have scenario name from store state
+    // Must have scenario name from store state (recorded as opaque contextTag)
     expect(metadata.contextTag).toBe('TestScenario');
     // Must have timestamps
     expect(typeof metadata.startedAt).toBe('string');

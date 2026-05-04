@@ -16,7 +16,11 @@ import {
 } from './ref-point-loader';
 import { createRefPointsZipContributor } from './ref-points-zip-contributor';
 import { MockFSDirectoryHandle } from 'gps-plus-slam-app-framework/test-utils/browser-mocks';
-import type { GpsPoint, Vector3, Quaternion } from 'gps-plus-slam-js';
+import type {
+  GpsPoint,
+  Vector3,
+  Quaternion,
+} from 'gps-plus-slam-app-framework/core';
 
 function makeObservation(
   sessionId: string,
@@ -45,8 +49,9 @@ describe('createRefPointsZipContributor', () => {
   // Capture every file the contributor writes so each test can assert on the
   // exact final layout.
   let written: Map<string, Blob>;
-  const addFile = vi.fn(async (path: string, blob: Blob) => {
+  const addFile = vi.fn((path: string, blob: Blob) => {
     written.set(path, blob);
+    return Promise.resolve();
   });
 
   beforeEach(() => {
@@ -57,7 +62,7 @@ describe('createRefPointsZipContributor', () => {
 
   it('declares the refPoints/ subdir', () => {
     const contributor = createRefPointsZipContributor(
-      scenarioHandle as unknown as FileSystemDirectoryHandle,
+      scenarioHandle,
       sessionName
     );
     expect(contributor.subdir).toBe('refPoints');
@@ -65,14 +70,14 @@ describe('createRefPointsZipContributor', () => {
 
   it('includes ref points observed in the current session', async () => {
     await saveRefPointObservation(
-      scenarioHandle as unknown as FileSystemDirectoryHandle,
+      scenarioHandle,
       '8b1f1a5c2e3d4f1',
       'Bench',
       makeObservation(sessionName, 1)
     );
 
     const contributor = createRefPointsZipContributor(
-      scenarioHandle as unknown as FileSystemDirectoryHandle,
+      scenarioHandle,
       sessionName
     );
     const count = await contributor.contribute(addFile);
@@ -91,20 +96,20 @@ describe('createRefPointsZipContributor', () => {
   it('filters out observations from other sessions', async () => {
     // Two observations on the same ref point: one for this session, one for another.
     await saveRefPointObservation(
-      scenarioHandle as unknown as FileSystemDirectoryHandle,
+      scenarioHandle,
       '8b1f1a5c2e3d4f2',
       'Fountain',
       makeObservation('recording-2026-04-12_09-00-00utc', 1000)
     );
     await saveRefPointObservation(
-      scenarioHandle as unknown as FileSystemDirectoryHandle,
+      scenarioHandle,
       '8b1f1a5c2e3d4f2',
       'Fountain',
       makeObservation(sessionName, 2000)
     );
 
     const contributor = createRefPointsZipContributor(
-      scenarioHandle as unknown as FileSystemDirectoryHandle,
+      scenarioHandle,
       sessionName
     );
     const count = await contributor.contribute(addFile);
@@ -119,14 +124,14 @@ describe('createRefPointsZipContributor', () => {
 
   it('excludes ref points with zero observations in this session', async () => {
     await saveRefPointObservation(
-      scenarioHandle as unknown as FileSystemDirectoryHandle,
+      scenarioHandle,
       '8b1f1a5c2e3d4f3',
       'Tree',
       makeObservation('recording-2026-04-12_09-00-00utc', 1000)
     );
 
     const contributor = createRefPointsZipContributor(
-      scenarioHandle as unknown as FileSystemDirectoryHandle,
+      scenarioHandle,
       sessionName
     );
     const count = await contributor.contribute(addFile);
@@ -138,7 +143,7 @@ describe('createRefPointsZipContributor', () => {
   it('returns 0 when the refPoints directory does not exist', async () => {
     // No saveRefPointObservation calls — refPoints/ never created.
     const contributor = createRefPointsZipContributor(
-      scenarioHandle as unknown as FileSystemDirectoryHandle,
+      scenarioHandle,
       sessionName
     );
     const count = await contributor.contribute(addFile);
@@ -156,14 +161,14 @@ describe('createRefPointsZipContributor', () => {
 
   it('preserves id, name, and createdAt fields', async () => {
     await saveRefPointObservation(
-      scenarioHandle as unknown as FileSystemDirectoryHandle,
+      scenarioHandle,
       '8b1f1a5c2e3d4f5',
       'Cathedral',
       makeObservation(sessionName, 1713000000000)
     );
 
     const contributor = createRefPointsZipContributor(
-      scenarioHandle as unknown as FileSystemDirectoryHandle,
+      scenarioHandle,
       sessionName
     );
     await contributor.contribute(addFile);

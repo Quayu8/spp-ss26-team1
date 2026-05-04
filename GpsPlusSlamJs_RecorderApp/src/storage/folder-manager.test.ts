@@ -621,8 +621,7 @@ describe('createFolderManager', () => {
     it('should load and display ref points when scenario handle is returned', async () => {
       // Why: Changing scenario must load its ref points for the AR view
       vi.mocked(setCurrentScenario).mockResolvedValue(mockFolderHandle);
-      const { loadAllRefPoints } =
-        await import('../storage/ref-point-loader');
+      const { loadAllRefPoints } = await import('../storage/ref-point-loader');
       vi.mocked(loadAllRefPoints).mockResolvedValue([]);
       const { manager } = createFolderManagerWithDefaults();
 
@@ -748,8 +747,8 @@ describe('createFolderManager', () => {
         { id: 'p2', name: 'P2', lat: 51.0, lon: 9.0 },
       ]);
       const mockMapOverlay = {
-        addPriorRefPoints: vi.fn(),
-        clearPriorRefPoints: vi.fn(),
+        addPriorMarkers: vi.fn(),
+        clearPriorMarkers: vi.fn(),
       };
       const { manager } = createFolderManagerWithDefaults({
         mapOverlay: mockMapOverlay,
@@ -757,8 +756,8 @@ describe('createFolderManager', () => {
 
       await manager.loadAndDisplayRefPoints(mockFolderHandle);
 
-      expect(mockMapOverlay.clearPriorRefPoints).toHaveBeenCalled();
-      expect(mockMapOverlay.addPriorRefPoints).toHaveBeenCalledWith([
+      expect(mockMapOverlay.clearPriorMarkers).toHaveBeenCalled();
+      expect(mockMapOverlay.addPriorMarkers).toHaveBeenCalledWith([
         { lat: 50.0, lon: 8.0, name: 'P1' },
         { lat: 51.0, lon: 9.0, name: 'P2' },
       ]);
@@ -771,8 +770,8 @@ describe('createFolderManager', () => {
       vi.mocked(loadAllRefPoints).mockResolvedValue([] as never);
       vi.mocked(averageGpsPerRefPoint).mockReturnValue([]);
       const mockMapOverlay = {
-        addPriorRefPoints: vi.fn(),
-        clearPriorRefPoints: vi.fn(),
+        addPriorMarkers: vi.fn(),
+        clearPriorMarkers: vi.fn(),
       };
       const { manager } = createFolderManagerWithDefaults({
         mapOverlay: mockMapOverlay,
@@ -780,11 +779,11 @@ describe('createFolderManager', () => {
 
       await manager.loadAndDisplayRefPoints(mockFolderHandle);
 
-      // clearPriorRefPoints must be called before addPriorRefPoints
+      // clearPriorMarkers must be called before addPriorMarkers
       const clearOrder =
-        mockMapOverlay.clearPriorRefPoints.mock.invocationCallOrder[0];
+        mockMapOverlay.clearPriorMarkers.mock.invocationCallOrder[0];
       const addOrder =
-        mockMapOverlay.addPriorRefPoints.mock.invocationCallOrder[0];
+        mockMapOverlay.addPriorMarkers.mock.invocationCallOrder[0];
       expect(clearOrder).toBeLessThan(addOrder);
     });
 
@@ -854,8 +853,7 @@ describe('createFolderManager', () => {
     it('should NOT attempt recovery when OPFS has data', async () => {
       // Why: Recovery should only run when OPFS is empty — unnecessary
       // ZIP scanning would slow down normal scenario changes.
-      const { loadAllRefPoints } =
-        await import('../storage/ref-point-loader');
+      const { loadAllRefPoints } = await import('../storage/ref-point-loader');
       const { recoverRefPointDefinitionsFromZips } =
         await import('../storage/ref-point-recovery');
 
@@ -872,8 +870,7 @@ describe('createFolderManager', () => {
 
     it('should NOT attempt recovery when no read folder is available', async () => {
       // Why: Without a read folder, there are no ZIPs to recover from.
-      const { loadAllRefPoints } =
-        await import('../storage/ref-point-loader');
+      const { loadAllRefPoints } = await import('../storage/ref-point-loader');
       const { recoverRefPointDefinitionsFromZips } =
         await import('../storage/ref-point-recovery');
 
@@ -890,8 +887,7 @@ describe('createFolderManager', () => {
     it('should handle recovery errors gracefully', async () => {
       // Why: Recovery failures should not crash scenario selection —
       // user can still record, just without prior ref points.
-      const { loadAllRefPoints } =
-        await import('../storage/ref-point-loader');
+      const { loadAllRefPoints } = await import('../storage/ref-point-loader');
       const { recoverRefPointDefinitionsFromZips } =
         await import('../storage/ref-point-recovery');
 
@@ -920,8 +916,7 @@ describe('createFolderManager', () => {
       vi.mocked(setCurrentScenario).mockResolvedValue(null);
       vi.mocked(ensureScenarioDirectory).mockResolvedValue(mockFolderHandle);
       vi.mocked(getReadFolderHandle).mockReturnValue(mockFolderHandle);
-      const { loadAllRefPoints } =
-        await import('../storage/ref-point-loader');
+      const { loadAllRefPoints } = await import('../storage/ref-point-loader');
       vi.mocked(loadAllRefPoints).mockResolvedValue([]);
 
       const { manager, deps } = createFolderManagerWithDefaults();

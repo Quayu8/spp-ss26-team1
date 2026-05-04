@@ -9,11 +9,11 @@ Shared H3 hexagonal grid utilities for reference point identity and matching. Re
 | Symbol                 | Signature                                                             | Description                                                                                                   |
 | ---------------------- | --------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------- |
 | `H3_RESOLUTION`        | `11` (const)                                                          | H3 resolution: ~25m edge, ~65m gridDisk safe zone                                                             |
-| `KnownGeoAnchor`        | `{ h3Index: string; displayName?: string; lat: number; lon: number }` | Interface for proximity matching (lat/lon needed for distance ranking)                                        |
+| `KnownGeoAnchor`       | `{ h3Index: string; displayName?: string; lat: number; lon: number }` | Interface for proximity matching (lat/lon needed for distance ranking)                                        |
 | `approxDistanceMetres` | `(lat1, lon1, lat2, lon2) => number`                                  | Equirectangular distance approximation, accurate < 1 km                                                       |
 | `gpsToH3`              | `(lat: number, lng: number) => string`                                | Compute H3 res-11 index from GPS                                                                              |
-| `findNearbyGeoAnchor`   | `(lat, lng, KnownGeoAnchors) => KnownGeoAnchor \| undefined`            | Find closest ref point within gridDisk(cell, 1) safe zone; ranks by distance when multiple candidates overlap |
-| `h3CellsMatch`          | `(h3a: string, h3b: string) => boolean`                               | Cross-session matching: checks if two H3 indices are within each other's gridDisk(cell, 1)                    |
+| `findNearbyGeoAnchor`  | `(lat, lng, KnownGeoAnchors) => KnownGeoAnchor \| undefined`          | Find closest ref point within gridDisk(cell, 1) safe zone; ranks by distance when multiple candidates overlap |
+| `h3CellsMatch`         | `(h3a: string, h3b: string) => boolean`                               | Cross-session matching: checks if two H3 indices are within each other's gridDisk(cell, 1)                    |
 | `isH3Index`            | `(id: string) => boolean`                                             | Checks if a string looks like an H3 res-11 index (15-char lowercase hex)                                      |
 
 ## Invariants & Assumptions

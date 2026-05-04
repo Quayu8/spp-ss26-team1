@@ -21,7 +21,11 @@ import type {
   RefPointDefinition,
   RefPointObservation,
 } from './ref-point-loader';
-import type { GpsPoint, Vector3, Quaternion } from 'gps-plus-slam-js';
+import type {
+  GpsPoint,
+  Vector3,
+  Quaternion,
+} from 'gps-plus-slam-app-framework/core';
 import type {
   ImportedRefPoint,
   RefPointImportResult,

@@ -31,22 +31,15 @@ import {
 function makeState(
   overrides: {
     gpsData?: CombinedRootState['gpsData'];
-    refPoints?: CombinedRootState['refPoints'];
   } = {}
 ): CombinedRootState {
   return {
     gpsData: overrides.gpsData ?? null,
-    // Subscriber logic only reads gpsData + refPoints; CombinedRootState
+    // Subscriber logic only reads gpsData; CombinedRootState
     // also has these other slices, faked as empty objects.
     gpsElements: {} as CombinedRootState['gpsElements'],
     arElements: {} as CombinedRootState['arElements'],
-    recorder: {} as CombinedRootState['recorder'],
-    refPoints: overrides.refPoints ?? {
-      importedRefPoints: [],
-      sessionRefPointUsage: {},
-      priorMarks: [],
-      currentMarks: [],
-    },
+    recording: {} as CombinedRootState['recording'],
   };
 }
 
@@ -1789,7 +1782,6 @@ describe('wireStoreSubscribers', () => {
       }).not.toThrow();
     });
   });
-
 
   // RefPoint visualizer subscriptions moved to RecorderApp in Iter 3 of the
   // AppFramework / RecorderApp boundary migration. See

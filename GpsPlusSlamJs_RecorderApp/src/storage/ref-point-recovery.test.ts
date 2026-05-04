@@ -16,7 +16,7 @@ import type {
   RefPointDefinition,
   RefPointObservation,
 } from './ref-point-loader';
-import type { GpsPoint } from 'gps-plus-slam-js';
+import type { GpsPoint } from 'gps-plus-slam-app-framework/core';
 
 // ============================================================================
 // Test Helpers

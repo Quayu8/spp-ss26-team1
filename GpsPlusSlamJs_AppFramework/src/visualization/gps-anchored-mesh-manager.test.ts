@@ -71,10 +71,7 @@ describe('GpsAnchoredMeshManager', () => {
       { id: 'b', lat: 50.7497, lon: 6.4795 },
       { id: 'c', lat: 50.7498, lon: 6.4796 },
     ]);
-    expect(scene.children.map((c) => c.name)).toEqual([
-      'anchor-b',
-      'anchor-c',
-    ]);
+    expect(scene.children.map((c) => c.name)).toEqual(['anchor-b', 'anchor-c']);
   });
 
   it('addItem appends meshes and shares a single geometry', () => {

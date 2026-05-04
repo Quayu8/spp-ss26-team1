@@ -3,11 +3,11 @@
  */
 
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { validateLicenseKey } from 'gps-plus-slam-js';
+import { validateLicenseKey } from 'gps-plus-slam-app-framework/core';
 import { COMMUNITY_LICENSE_KEY } from 'gps-plus-slam-js/community-license-key';
 import { RefPointVisualizer } from './ref-point-visualizer';
 import type { RefPointMark } from '../storage/ref-point-loader';
-import type { LatLong } from 'gps-plus-slam-js';
+import type { LatLong } from 'gps-plus-slam-app-framework/core';
 import * as THREE from 'three';
 
 // Activate the gps-plus-slam-js license once for this suite so calls into

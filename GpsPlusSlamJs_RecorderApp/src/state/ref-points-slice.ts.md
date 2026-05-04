@@ -29,8 +29,8 @@ Redux slice managing reference point state that was previously stored as closure
 
 ### Selectors
 
-| Selector                     | Input            | Output            | Description                                     |
-| ---------------------------- | ---------------- | ----------------- | ----------------------------------------------- |
+| Selector                     | Input            | Output             | Description                                     |
+| ---------------------------- | ---------------- | ------------------ | ----------------------------------------------- |
 | `selectCachedKnownRefPoints` | `RefPointsState` | `KnownGeoAnchor[]` | Memoized derivation of H3-indexed known ref pts |
 
 ### Exports

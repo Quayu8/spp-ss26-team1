@@ -47,8 +47,11 @@ export function wireRefPointSubscribers(
     if (priorMarks !== lastPriorMarks) {
       lastPriorMarks = priorMarks;
       const withGps = priorMarks.filter(
-        (m): m is RefPointMark & { gpsPosition: NonNullable<RefPointMark['gpsPosition']> } =>
-          m.gpsPosition !== undefined
+        (
+          m
+        ): m is RefPointMark & {
+          gpsPosition: NonNullable<RefPointMark['gpsPosition']>;
+        } => m.gpsPosition !== undefined
       );
       visualizer.displayPriorRefPoints(withGps);
     }

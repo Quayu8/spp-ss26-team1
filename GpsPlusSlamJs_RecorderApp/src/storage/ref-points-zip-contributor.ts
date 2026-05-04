@@ -37,8 +37,7 @@ export function createRefPointsZipContributor(
 
       let refPointsHandle: FileSystemDirectoryHandle;
       try {
-        refPointsHandle =
-          await scenarioHandle.getDirectoryHandle('refPoints');
+        refPointsHandle = await scenarioHandle.getDirectoryHandle('refPoints');
       } catch {
         // No refPoints directory yet — nothing to include
         return 0;

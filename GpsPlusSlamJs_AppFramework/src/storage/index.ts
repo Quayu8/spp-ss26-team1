@@ -40,8 +40,6 @@ export {
   writeAction,
   writeFrame,
   writeSessionMetadata as writeSessionMeta,
-  isRefPointAction,
-  loadScenarioRefPoints,
   getCurrentScenarioHandle,
   setCurrentScenario,
   ensureScenarioDirectory,

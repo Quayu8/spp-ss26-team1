@@ -23,10 +23,7 @@ import {
   type SessionMetadata,
 } from './opfs-storage';
 import { formatTimestamp } from './file-system-utils';
-import {
-  exportSessionAsZip,
-  type ZipExportContributor,
-} from './zip-export';
+import { exportSessionAsZip, type ZipExportContributor } from './zip-export';
 import { loadEntriesFromSubdir } from './zip-reader';
 
 async function unzipAsMap(blob: Blob): Promise<Map<string, Uint8Array>> {
@@ -41,7 +38,9 @@ async function unzipAsMap(blob: Blob): Promise<Map<string, Uint8Array>> {
   return out;
 }
 
-async function makeFlatSession(name = 'recording-' + formatTimestamp(new Date())): Promise<string> {
+async function makeFlatSession(
+  name = 'recording-' + formatTimestamp(new Date())
+): Promise<string> {
   await initOpfsStorage();
   const root = getAppRootHandle()!;
   const sessions = await root.getDirectoryHandle('sessions', { create: true });
@@ -80,9 +79,13 @@ describe('zip-export — ZipExportContributor seam', () => {
   it('ignores an empty contributors list and produces the framework-only zip', async () => {
     // Why: backwards compatibility — no consumer must change to keep working.
     const sessionName = await makeFlatSession();
-    const { blob, fileCount } = await exportSessionAsZip(sessionName, undefined, {
-      contributors: [],
-    });
+    const { blob, fileCount } = await exportSessionAsZip(
+      sessionName,
+      undefined,
+      {
+        contributors: [],
+      }
+    );
     const files = await unzipAsMap(blob);
     expect(files.has('session.json')).toBe(true);
     expect(files.has('actions/000001.json')).toBe(true);
@@ -109,9 +112,13 @@ describe('zip-export — ZipExportContributor seam', () => {
       },
     };
 
-    const { blob, fileCount } = await exportSessionAsZip(sessionName, undefined, {
-      contributors: [contributor],
-    });
+    const { blob, fileCount } = await exportSessionAsZip(
+      sessionName,
+      undefined,
+      {
+        contributors: [contributor],
+      }
+    );
     const files = await unzipAsMap(blob);
 
     expect(files.has('extras/one.json')).toBe(true);
@@ -129,12 +136,14 @@ describe('zip-export — ZipExportContributor seam', () => {
     const sessionName = await makeFlatSession();
     const contributor: ZipExportContributor = {
       subdir: 'bad/segment',
-      async contribute() {
-        return 0;
+      contribute() {
+        return Promise.resolve(0);
       },
     };
     await expect(
-      exportSessionAsZip(sessionName, undefined, { contributors: [contributor] })
+      exportSessionAsZip(sessionName, undefined, {
+        contributors: [contributor],
+      })
     ).rejects.toThrow(/single path segment/);
   });
 
@@ -144,8 +153,8 @@ describe('zip-export — ZipExportContributor seam', () => {
     const sessionName = await makeFlatSession();
     const make = (): ZipExportContributor => ({
       subdir: 'extras',
-      async contribute() {
-        return 0;
+      contribute() {
+        return Promise.resolve(0);
       },
     });
     await expect(
@@ -166,7 +175,9 @@ describe('zip-export — ZipExportContributor seam', () => {
       },
     };
     await expect(
-      exportSessionAsZip(sessionName, undefined, { contributors: [contributor] })
+      exportSessionAsZip(sessionName, undefined, {
+        contributors: [contributor],
+      })
     ).rejects.toThrow(/must not start with/);
   });
 });

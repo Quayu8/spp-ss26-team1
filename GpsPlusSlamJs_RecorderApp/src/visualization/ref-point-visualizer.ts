@@ -12,7 +12,7 @@
  * same warning logs when the zero reference or scene is missing.
  */
 
-import type { LatLong } from 'gps-plus-slam-js';
+import type { LatLong } from 'gps-plus-slam-app-framework/core';
 import type { RefPointMark } from '../storage/ref-point-loader';
 import {
   GpsAnchoredMeshManager,

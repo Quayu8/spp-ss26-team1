@@ -25,7 +25,7 @@ function makeMark(id: string, timestamp = 0): RefPointMark {
     odomRotation: [0, 0, 0, 1],
     gpsPosition: { lat: 50, lon: 8, altitude: 245 },
     timestamp,
-  } as RefPointMark;
+  };
 }
 
 function makeMockStore(initial: MockState) {

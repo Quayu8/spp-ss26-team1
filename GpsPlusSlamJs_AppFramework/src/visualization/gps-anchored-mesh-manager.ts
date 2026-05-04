@@ -64,9 +64,7 @@ export class GpsAnchoredMeshManager {
     this.color = options.color;
     this.radius = options.radius ?? DEFAULT_RADIUS;
     this.namePrefix = options.namePrefix;
-    this.log = createLogger(
-      options.loggerLabel ?? 'GpsAnchoredMeshManager'
-    );
+    this.log = createLogger(options.loggerLabel ?? 'GpsAnchoredMeshManager');
   }
 
   /** Set the GPS origin used to project items into local meters. */

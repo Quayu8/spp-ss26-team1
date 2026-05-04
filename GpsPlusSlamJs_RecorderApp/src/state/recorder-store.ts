@@ -25,10 +25,7 @@ import {
   createSlamAppStore,
   type SlamAppStore,
 } from 'gps-plus-slam-app-framework/state/create-slam-app-store';
-import {
-  refPointsReducer,
-  type RefPointsState,
-} from './ref-points-slice';
+import { refPointsReducer, type RefPointsState } from './ref-points-slice';
 import type { RecordingState } from 'gps-plus-slam-app-framework/state/recording-slice';
 import type { StorageBackend } from 'gps-plus-slam-app-framework/storage/storage-backend';
 import { OpfsStorageBackend } from 'gps-plus-slam-app-framework/storage/opfs-storage-backend';
@@ -98,11 +95,11 @@ export type { SessionMetadata as OpfsSessionMetadata } from 'gps-plus-slam-app-f
 // --- Recorder-owned types ---
 
 /**
- * Combined root state: library state + recorder slices (recorder, refPoints,
- * routing). Composed by `createRecorderStore`.
+ * Combined root state: library state + recorder slices (recording, refPoints,
+ * routing, scenario). Composed by `createRecorderStore`.
  */
 export interface CombinedRootState extends LibraryRootState {
-  recorder: RecordingState;
+  recording: RecordingState;
   refPoints: RefPointsState;
   routing: RoutingState;
   scenario: ScenarioState;

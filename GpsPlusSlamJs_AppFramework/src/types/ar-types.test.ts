@@ -20,8 +20,6 @@ import type {
   WebXRQuaternion,
 } from './ar-types';
 import type { ImageCaptureCallbacks } from '../ar/image-capture';
-import type { RefPointObservation } from '../storage/ref-point-loader';
-import type { RefPointRecord } from '../storage/file-system';
 import type {
   DepthSample as StoreDepthSample,
   DepthPoint as StoreDepthPoint,
@@ -514,56 +512,7 @@ describe('AR Types', () => {
     });
   });
 
-  describe('Single-source-of-truth: ArPoseTuples in storage interfaces', () => {
-    /**
-     * Why this test matters:
-     * RefPointObservation.arPose, ParsedRefPointAction, and RefPointRecord
-     * previously defined { position: [n,n,n]; rotation: [n,n,n,n] } inline.
-     * These tests prove they now use the canonical ArPoseTuples type so any
-     * structural drift is caught at compile time + runtime.
-     *
-     * ParsedRefPointAction is intentionally not tested here because it is
-     * module-private to file-system.ts and already typed as ArPoseTuples,
-     * so the compiler enforces structural identity without an export.
-     */
-    it('RefPointObservation.arPose is structurally ArPoseTuples', () => {
-      const obs: RefPointObservation = {
-        sessionId: 'test-session',
-        timestamp: 1000,
-        arPose: { position: [1, 2, 3], rotation: [0, 0, 0, 1] },
-        gpsPoint: {
-          id: 'gps-1',
-          zeroRef: { lat: 50, lon: 8 },
-          latitude: 50,
-          longitude: 8,
-          altitude: 100,
-          coordinates: [0, 0, 0],
-          weight: 1,
-          timestamp: 1000,
-        },
-      };
-
-      // Compile-time: arPose must satisfy ArPoseTuples
-      const arPose: ArPoseTuples = obs.arPose;
-      expect(arPose.position).toEqual([1, 2, 3]);
-      expect(arPose.rotation).toEqual([0, 0, 0, 1]);
-    });
-
-    it('RefPointRecord.arPose is structurally ArPoseTuples when present', () => {
-      const record: RefPointRecord = {
-        id: 'point-a',
-        sessionName: 'session-1',
-        arPose: { position: [4, 5, 6], rotation: [0.1, 0.2, 0.3, 0.9] },
-      };
-
-      // Compile-time: arPose must satisfy ArPoseTuples
-      const arPose: ArPoseTuples = record.arPose!;
-      expect(arPose.position).toEqual([4, 5, 6]);
-      expect(arPose.rotation).toEqual([0.1, 0.2, 0.3, 0.9]);
-    });
-  });
-
-  // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // ──────────────────────────────────────────────────────────────────────
   // Inline tuple â†’ Vector3/Quaternion migration guards (Finding #1)
   // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 

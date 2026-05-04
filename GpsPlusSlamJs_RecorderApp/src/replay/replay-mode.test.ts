@@ -293,7 +293,7 @@ describe('replay-mode', () => {
     expect(mockOverlay.setGpsPosition).not.toHaveBeenCalled();
   });
 
-  it('setMapOverlay proxy forwards addFusedPoint, addAlignmentSnapshot, and addRefPoint', async () => {
+  it('setMapOverlay proxy forwards addFusedPoint, addAlignmentSnapshot, and addCurrentMarker', async () => {
     // Why (Phase 1b): The map overlay proxy must forward all new overlay
     // methods so the store subscriber can push fused path, alignment
     // snapshots, and reference points to the Leaflet map in replay mode.
@@ -305,20 +305,27 @@ describe('replay-mode', () => {
       addRawGpsPoint: vi.fn(),
       addFusedPoint: vi.fn(),
       addAlignmentSnapshot: vi.fn(),
-      addRefPoint: vi.fn(),
+      addCurrentMarker: vi.fn(),
     };
     controller.setMapOverlay(mockOverlay);
 
     const deps = vi.mocked(wireStoreSubscribers).mock.calls[0][1];
+    const mapProxy = deps.mapOverlay! as NonNullable<typeof deps.mapOverlay> & {
+      addCurrentMarker: (lat: number, lon: number, name: string) => void;
+    };
 
-    deps.mapOverlay!.addFusedPoint!(50.1, 8.1);
+    mapProxy.addFusedPoint!(50.1, 8.1);
     expect(mockOverlay.addFusedPoint).toHaveBeenCalledWith(50.1, 8.1);
 
-    deps.mapOverlay!.addAlignmentSnapshot!(50.2, 8.2);
+    mapProxy.addAlignmentSnapshot!(50.2, 8.2);
     expect(mockOverlay.addAlignmentSnapshot).toHaveBeenCalledWith(50.2, 8.2);
 
-    deps.mapOverlay!.addRefPoint!(50.3, 8.3, 'bench');
-    expect(mockOverlay.addRefPoint).toHaveBeenCalledWith(50.3, 8.3, 'bench');
+    mapProxy.addCurrentMarker(50.3, 8.3, 'bench');
+    expect(mockOverlay.addCurrentMarker).toHaveBeenCalledWith(
+      50.3,
+      8.3,
+      'bench'
+    );
   });
 
   // --- Play dispatches actions to the store ---

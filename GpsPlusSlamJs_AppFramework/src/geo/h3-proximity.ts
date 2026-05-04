@@ -83,9 +83,7 @@ export function findNearbyGeoAnchor(
   const currentCell = latLngToCell(lat, lng, H3_RESOLUTION);
   const safeZone = gridDisk(currentCell, 1);
 
-  const candidates = knownAnchors.filter((rp) =>
-    safeZone.includes(rp.h3Index)
-  );
+  const candidates = knownAnchors.filter((rp) => safeZone.includes(rp.h3Index));
 
   if (candidates.length === 0) return undefined;
   if (candidates.length === 1) return candidates[0];

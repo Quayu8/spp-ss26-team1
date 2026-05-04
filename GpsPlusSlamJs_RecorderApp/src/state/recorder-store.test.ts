@@ -144,7 +144,7 @@ describe('Recorder Store', () => {
       const state = store.getState();
       const gpsEvents = state.gpsData?.gpsEvents;
       expect(gpsEvents?.odometryPositions.length).toBe(1);
-      // Dispatched [1,2,3] (raw WebXR) Ã¢â€ â€™ reducer applies webxrToNUE Ã¢â€ â€™ [-3, 2, 1]
+      // Dispatched [1,2,3] (raw WebXR) -> reducer applies webxrToNUE -> [-3, 2, 1]
       expect(gpsEvents?.odometryPositions[0]).toEqual([-3, 2, 1]);
       expect(gpsEvents?.gpsPositions.length).toBe(1);
       expect(gpsEvents?.gpsPositions[0].latitude).toBeCloseTo(48.8567);
@@ -544,7 +544,7 @@ describe('Recorder Store', () => {
        * When writeAction fails, we dispatch recordWriteFailure to track the failure.
        * If recordWriteFailure itself were persisted, and that write also failed,
        * we'd get infinite recursion:
-       *   writeAction fails Ã¢â€ â€™ recordWriteFailure Ã¢â€ â€™ writeAction Ã¢â€ â€™ fails Ã¢â€ â€™ recordWriteFailure Ã¢â€ â€™ ...
+       *   writeAction fails -> recordWriteFailure -> writeAction -> fails -> recordWriteFailure -> ...
        *
        * This test ensures recordWriteFailure is excluded from persistence.
        * This also enables us to use dispatch() consistently in the catch block

@@ -337,7 +337,6 @@ export async function loadGpsPathFromBlob(
   }
 }
 
-
 // ---------------------------------------------------------------------------
 // Extension contributor reader (Iter 2 of boundary cleanup)
 // ---------------------------------------------------------------------------
@@ -398,6 +397,6 @@ export async function loadEntriesFromSubdir(
     relativePath: entry.filename.slice(prefix.length),
     fullPath: entry.filename,
     uncompressedSize: entry.uncompressedSize,
-    getText: async () => entry.getData!(new TextWriter()),
+    getText: () => entry.getData(new TextWriter()),
   }));
 }

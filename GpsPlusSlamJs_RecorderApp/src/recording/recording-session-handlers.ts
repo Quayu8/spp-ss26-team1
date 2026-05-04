@@ -304,8 +304,8 @@ export function createRecordingSessionHandlers(
       addAlignmentSnapshot(lat: number, lon: number): void {
         deps.getMapOverlay()?.addAlignmentSnapshot(lat, lon);
       },
-      addRefPoint(lat: number, lon: number, name: string): void {
-        deps.getMapOverlay()?.addRefPoint(lat, lon, name);
+      addCurrentMarker(lat: number, lon: number, name: string): void {
+        deps.getMapOverlay()?.addCurrentMarker(lat, lon, name);
       },
     };
     unsubscribeStore = wireStoreSubscribers(store, {

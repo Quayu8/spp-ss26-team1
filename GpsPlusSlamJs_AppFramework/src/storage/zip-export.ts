@@ -185,7 +185,6 @@ export async function exportSessionAsZip(
   options?: ExportSessionAsZipOptions
 ): Promise<ZipExportResult> {
   let sessionHandle: FileSystemDirectoryHandle;
-  let scenarioHandle: FileSystemDirectoryHandle | null = null;
 
   if (sessionName) {
     // Scenario-based layout: scenarios/{scenarioName}/{sessionName}
@@ -193,6 +192,7 @@ export async function exportSessionAsZip(
     log.info(`Exporting session: ${scenarioName}/${sessionName}`);
 
     const scenariosDir = await getScenariosHandle();
+    let scenarioHandle: FileSystemDirectoryHandle;
     try {
       scenarioHandle = await scenariosDir.getDirectoryHandle(scenarioName);
     } catch {
@@ -254,10 +254,7 @@ export async function exportSessionAsZip(
           `ZipExportContributor relative path must not start with '/' (got ${relativePath})`
         );
       }
-      await zipWriter.add(
-        `${subdir}/${relativePath}`,
-        new BlobReader(blob)
-      );
+      await zipWriter.add(`${subdir}/${relativePath}`, new BlobReader(blob));
     };
     fileCount += await contributor.contribute(addFile);
   }

@@ -31,21 +31,25 @@ Constructor — creates an overlay instance (does not show it yet).
 
 ### Key Methods
 
-| Method                             | Description                                                        |
-| ---------------------------------- | ------------------------------------------------------------------ |
-| `setGpsPosition(lat, lon)`         | Set/update GPS position; centers map and moves user dot            |
-| `show()`                           | Create Leaflet map + CSS3DObject; requires GPS position            |
-| `hide()`                           | Remove CSS3DObject from scene (preserves buffered data)            |
-| `toggle()`                         | Toggle visibility                                                  |
-| `addRawGpsPoint(lat, lon)`         | Append point to raw GPS polyline (yellow)                          |
-| `addFusedPoint(lat, lon)`          | Append point to fused polyline (cyan)                              |
-| `addAlignmentSnapshot(lat, lon)`   | Add point to red alignment snapshot polyline                       |
-| `setZoomLevel(zoom)`               | Set zoom level (clamped 0–19)                                      |
-| `zoomIn()`                         | Increment zoom by 1 (clamped at max)                               |
-| `zoomOut()`                        | Decrement zoom by 1 (clamped at min)                               |
-| `getLeafletMap()`                  | Returns the Leaflet `L.Map` instance or `null`                     |
-| `updatePosition()`                 | No-op (backward compat with frame-loop call)                       |
-| `dispose()`                        | Full cleanup — hides, destroys map, clears buffers                 |
+| Method                             | Description                                                                                                                          |
+| ---------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
+| `setGpsPosition(lat, lon)`         | Set/update GPS position; centers map and moves user dot                                                                              |
+| `show()`                           | Create Leaflet map + CSS3DObject; requires GPS position                                                                              |
+| `hide()`                           | Remove CSS3DObject from scene (preserves buffered data)                                                                              |
+| `toggle()`                         | Toggle visibility                                                                                                                    |
+| `addRawGpsPoint(lat, lon)`         | Append point to raw GPS polyline (yellow)                                                                                            |
+| `addFusedPoint(lat, lon)`          | Append point to fused polyline (cyan)                                                                                                |
+| `addAlignmentSnapshot(lat, lon)`   | Add point to red alignment snapshot polyline                                                                                         |
+| `addCurrentMarker(lat, lon, name)` | Add a generic "current" named marker (red dot, popup label). App-defined semantics — used by recorder for newly observed ref-points. |
+| `addPriorMarker(lat, lon, name)`   | Add a "prior" named marker (green, decorated with 📌). Used by recorder for historical ref-points loaded from prior sessions.        |
+| `addPriorMarkers(markers)`         | Bulk-add prior markers.                                                                                                              |
+| `clearPriorMarkers()`              | Remove all prior markers; current markers untouched.                                                                                 |
+| `setZoomLevel(zoom)`               | Set zoom level (clamped 0–19)                                                                                                        |
+| `zoomIn()`                         | Increment zoom by 1 (clamped at max)                                                                                                 |
+| `zoomOut()`                        | Decrement zoom by 1 (clamped at min)                                                                                                 |
+| `getLeafletMap()`                  | Returns the Leaflet `L.Map` instance or `null`                                                                                       |
+| `updatePosition()`                 | No-op (backward compat with frame-loop call)                                                                                         |
+| `dispose()`                        | Full cleanup — hides, destroys map, clears buffers                                                                                   |
 
 ### Exported Constants
 

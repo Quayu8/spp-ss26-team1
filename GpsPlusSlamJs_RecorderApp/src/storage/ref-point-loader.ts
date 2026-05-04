@@ -11,7 +11,7 @@ import type {
   LatLongAlt,
   Vector3,
   Quaternion,
-} from 'gps-plus-slam-js';
+} from 'gps-plus-slam-app-framework/core';
 import type { ArPoseTuples } from 'gps-plus-slam-app-framework/types/ar-types';
 import { createLogger } from 'gps-plus-slam-app-framework/utils/logger';
 

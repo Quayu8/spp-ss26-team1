@@ -13,7 +13,10 @@
 
 import type { ARPose } from '../types/ar-types';
 import type { Quaternion, Vector3 } from 'gps-plus-slam-js';
-import { extractOdomPosition, extractOdomRotation } from './gps-event-coordinator';
+import {
+  extractOdomPosition,
+  extractOdomRotation,
+} from './gps-event-coordinator';
 
 export type { ARPose };
 export { extractOdomPosition, extractOdomRotation };
