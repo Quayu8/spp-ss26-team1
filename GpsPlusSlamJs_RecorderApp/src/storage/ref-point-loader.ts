@@ -14,6 +14,7 @@ import type {
 } from 'gps-plus-slam-app-framework/core';
 import type { ArPoseTuples } from 'gps-plus-slam-app-framework/types/ar-types';
 import { createLogger } from 'gps-plus-slam-app-framework/utils/logger';
+import { isRefPointDefinitionShape } from './ref-point-zip-helpers';
 
 const log = createLogger('RefPointLoader');
 
@@ -94,22 +95,12 @@ function isValidObservation(obs: unknown): obs is RefPointObservation {
  * Also validates each observation to ensure nested properties exist.
  */
 function isRefPointDefinition(value: unknown): value is RefPointDefinition {
-  if (typeof value !== 'object' || value === null) {
-    return false;
-  }
-  const obj = value as Record<string, unknown>;
-
-  if (
-    typeof obj.id !== 'string' ||
-    typeof obj.name !== 'string' ||
-    typeof obj.createdAt !== 'number' ||
-    !Array.isArray(obj.observations)
-  ) {
+  if (!isRefPointDefinitionShape(value)) {
     return false;
   }
 
   // Validate each observation has required nested structure
-  return (obj.observations as unknown[]).every(isValidObservation);
+  return (value.observations as unknown[]).every(isValidObservation);
 }
 
 /**
@@ -240,31 +231,7 @@ export async function saveRefPointObservation(
         };
 
     // Write to file using safe pattern: abort writable on failure to release lock
-    const fileHandle = await refPointsHandle.getFileHandle(`${pointId}.json`, {
-      create: true,
-    });
-    const writable = await fileHandle.createWritable();
-    let writeError: unknown = null;
-    try {
-      await writable.write(JSON.stringify(definition, null, 2));
-      await writable.close();
-    } catch (error: unknown) {
-      writeError = error;
-    } finally {
-      if (writeError !== null) {
-        try {
-          await writable.abort();
-        } catch {
-          // Intentionally ignored: abort failure should not mask the write error
-        }
-      }
-    }
-    if (writeError !== null) {
-      if (writeError instanceof Error) {
-        throw writeError;
-      }
-      throw new Error('OPFS write failed');
-    }
+    await writeRefPointDefinitionFile(refPointsHandle, definition);
 
     log.info(
       `Saved observation for ${pointId} (${definition.observations.length} total observations)`
@@ -290,7 +257,22 @@ export async function writeRefPointDefinition(
   const refPointsHandle = await scenarioHandle.getDirectoryHandle('refPoints', {
     create: true,
   });
+  await writeRefPointDefinitionFile(refPointsHandle, definition);
+}
 
+/**
+ * Atomically write a single RefPointDefinition JSON file inside `refPointsHandle`.
+ *
+ * Uses the OPFS "abort writable on failure" pattern: if `write()` or `close()`
+ * throws, we explicitly call `abort()` to release the underlying lock so the
+ * partial file does not block subsequent writes. Aborts that themselves throw
+ * are intentionally swallowed because the original write error is the more
+ * useful diagnostic for callers.
+ */
+async function writeRefPointDefinitionFile(
+  refPointsHandle: FileSystemDirectoryHandle,
+  definition: RefPointDefinition
+): Promise<void> {
   const fileHandle = await refPointsHandle.getFileHandle(
     `${definition.id}.json`,
     { create: true }

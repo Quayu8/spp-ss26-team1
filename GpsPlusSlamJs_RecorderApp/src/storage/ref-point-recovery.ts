@@ -15,9 +15,13 @@
  * and ref-point-importer.ts).
  */
 
-import { BlobReader, ZipReader, TextWriter } from '@zip.js/zip.js';
 import type { RefPointDefinition } from './ref-point-loader';
 import { createLogger } from 'gps-plus-slam-app-framework/utils/logger';
+import {
+  extractRefPointEntriesFromZip,
+  isRefPointDefinitionShape,
+  isZipFileName,
+} from './ref-point-zip-helpers';
 
 const log = createLogger('RefPointRecovery');
 
@@ -41,18 +45,6 @@ export interface RefPointRecoveryResult {
 // Validation Helpers
 // ============================================================================
 
-function isZipFileName(name: string): boolean {
-  return name.toLowerCase().endsWith('.zip');
-}
-
-function isRefPointEntry(entryPath: string): boolean {
-  return (
-    entryPath.startsWith('refPoints/') &&
-    entryPath.endsWith('.json') &&
-    entryPath !== 'refPoints/'
-  );
-}
-
 /**
  * Validate parsed JSON matches RefPointDefinition shape.
  * Looser than ref-point-loader's validator: accepts empty observations
@@ -60,21 +52,7 @@ function isRefPointEntry(entryPath: string): boolean {
  * validation on every observation (the importer's validator already checks
  * first obs structure).
  */
-function isValidRefPointDefinition(
-  value: unknown
-): value is RefPointDefinition {
-  if (typeof value !== 'object' || value === null) return false;
-  const obj = value as Record<string, unknown>;
-  if (
-    typeof obj.id !== 'string' ||
-    typeof obj.name !== 'string' ||
-    typeof obj.createdAt !== 'number' ||
-    !Array.isArray(obj.observations)
-  ) {
-    return false;
-  }
-  return true;
-}
+const isValidRefPointDefinition = isRefPointDefinitionShape;
 
 // ============================================================================
 // ZIP Processing
@@ -87,51 +65,13 @@ async function extractDefinitionsFromZip(
   zipBlob: Blob,
   zipFileName: string
 ): Promise<{ definitions: RefPointDefinition[]; errors: string[] }> {
-  const definitions: RefPointDefinition[] = [];
-  const errors: string[] = [];
-
-  const zipReader = new ZipReader(new BlobReader(zipBlob));
-
-  try {
-    const entries = await zipReader.getEntries();
-
-    for (const entry of entries) {
-      if (entry.directory) continue;
-      if (!isRefPointEntry(entry.filename)) continue;
-
-      try {
-        const textWriter = new TextWriter();
-        const jsonText = await entry.getData(textWriter);
-
-        let parsed: unknown;
-        try {
-          parsed = JSON.parse(jsonText);
-        } catch (parseErr) {
-          errors.push(
-            `${zipFileName}/${entry.filename}: Invalid JSON - ${(parseErr as Error).message}`
-          );
-          continue;
-        }
-
-        if (!isValidRefPointDefinition(parsed)) {
-          errors.push(
-            `${zipFileName}/${entry.filename}: Invalid ref point schema`
-          );
-          continue;
-        }
-
-        definitions.push(parsed);
-      } catch (entryErr) {
-        errors.push(
-          `${zipFileName}/${entry.filename}: ${(entryErr as Error).message}`
-        );
-      }
-    }
-  } finally {
-    await zipReader.close();
-  }
-
-  return { definitions, errors };
+  const { items, errors } = await extractRefPointEntriesFromZip(
+    zipBlob,
+    zipFileName,
+    isValidRefPointDefinition,
+    (def) => def
+  );
+  return { definitions: items, errors };
 }
 
 // ============================================================================

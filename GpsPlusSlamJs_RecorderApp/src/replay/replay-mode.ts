@@ -64,6 +64,19 @@ interface ReplayModeConfig {
   onError: (actionIndex: number, error: Error) => void;
 }
 
+/**
+ * Subset of the recorder's `LeafletMapOverlay` API that replay mode forwards
+ * GPS / marker updates to. Declared structurally (instead of importing the
+ * concrete type) so replay mode stays decoupled from the live recorder map.
+ */
+interface ReplayMapOverlay {
+  setGpsPosition: (lat: number, lon: number) => void;
+  addRawGpsPoint?: (lat: number, lon: number) => void;
+  addFusedPoint?: (lat: number, lon: number) => void;
+  addAlignmentSnapshot?: (lat: number, lon: number) => void;
+  addCurrentMarker?: (lat: number, lon: number, name: string) => void;
+}
+
 export interface ReplayModeController {
   /** Start dispatching actions at the given speed factor */
   play(speedFactor: number): Promise<void>;
@@ -82,15 +95,7 @@ export interface ReplayModeController {
   /** Get the total number of loaded actions */
   getActionCount(): number;
   /** Set or clear the map overlay for GPS position updates via store subscribers */
-  setMapOverlay(
-    overlay: {
-      setGpsPosition: (lat: number, lon: number) => void;
-      addRawGpsPoint?: (lat: number, lon: number) => void;
-      addFusedPoint?: (lat: number, lon: number) => void;
-      addAlignmentSnapshot?: (lat: number, lon: number) => void;
-      addCurrentMarker?: (lat: number, lon: number, name: string) => void;
-    } | null
-  ): void;
+  setMapOverlay(overlay: ReplayMapOverlay | null): void;
   /** Dispose all resources (scene, engine, subscribers) */
   dispose(): void;
 }
@@ -141,13 +146,7 @@ export async function startReplayMode(
 
   // Map overlay proxy â€” delegates to a late-bound real overlay so the
   // store subscriber can update the map even though it is created later.
-  let mapOverlayTarget: {
-    setGpsPosition: (lat: number, lon: number) => void;
-    addRawGpsPoint?: (lat: number, lon: number) => void;
-    addFusedPoint?: (lat: number, lon: number) => void;
-    addAlignmentSnapshot?: (lat: number, lon: number) => void;
-    addCurrentMarker?: (lat: number, lon: number, name: string) => void;
-  } | null = null;
+  let mapOverlayTarget: ReplayMapOverlay | null = null;
   const mapOverlayProxy = {
     setGpsPosition(lat: number, lon: number): void {
       mapOverlayTarget?.setGpsPosition(lat, lon);
@@ -260,15 +259,7 @@ export async function startReplayMode(
       return actions.length;
     },
 
-    setMapOverlay(
-      overlay: {
-        setGpsPosition: (lat: number, lon: number) => void;
-        addRawGpsPoint?: (lat: number, lon: number) => void;
-        addFusedPoint?: (lat: number, lon: number) => void;
-        addAlignmentSnapshot?: (lat: number, lon: number) => void;
-        addCurrentMarker?: (lat: number, lon: number, name: string) => void;
-      } | null
-    ): void {
+    setMapOverlay(overlay: ReplayMapOverlay | null): void {
       mapOverlayTarget = overlay;
     },
 

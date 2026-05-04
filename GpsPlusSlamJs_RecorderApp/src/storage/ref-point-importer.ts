@@ -13,13 +13,17 @@
  * Uses @zip.js/zip.js for ZIP reading (same library as zip-export.ts).
  */
 
-import { BlobReader, ZipReader, TextWriter } from '@zip.js/zip.js';
 import type { RefPointDefinition } from './ref-point-loader';
 import { createLogger } from 'gps-plus-slam-app-framework/utils/logger';
 import {
   h3CellsMatch,
   isH3Index,
 } from 'gps-plus-slam-app-framework/geo/h3-proximity';
+import {
+  extractRefPointEntriesFromZip,
+  isRefPointDefinitionShape,
+  isZipFileName,
+} from './ref-point-zip-helpers';
 
 const log = createLogger('RefPointImporter');
 
@@ -66,54 +70,25 @@ export interface RefPointImportResult {
 // ============================================================================
 
 /**
- * Check if a file name is a ZIP file (case-insensitive).
- */
-function isZipFileName(name: string): boolean {
-  return name.toLowerCase().endsWith('.zip');
-}
-
-/**
- * Check if a ZIP entry path is a ref point JSON file.
- * Expected path: refPoints/{id}.json
- */
-function isRefPointEntry(entryPath: string): boolean {
-  return (
-    entryPath.startsWith('refPoints/') &&
-    entryPath.endsWith('.json') &&
-    entryPath !== 'refPoints/'
-  );
-}
-
-/**
  * Type guard to validate parsed JSON matches RefPointDefinition shape.
- * Validates at least one observation exists with required nested properties.
+ * Builds on the shared base predicate and additionally requires the first
+ * observation to expose a `gpsPoint` with numeric `latitude`/`longitude`,
+ * because this importer needs those coordinates for proximity suggestions.
  */
 function isValidRefPointDefinition(
   value: unknown
 ): value is RefPointDefinition {
-  if (typeof value !== 'object' || value === null) {
-    return false;
-  }
-
-  const obj = value as Record<string, unknown>;
-
-  // Check required fields
-  if (
-    typeof obj.id !== 'string' ||
-    typeof obj.name !== 'string' ||
-    typeof obj.createdAt !== 'number' ||
-    !Array.isArray(obj.observations)
-  ) {
+  if (!isRefPointDefinitionShape(value)) {
     return false;
   }
 
   // Empty observations is technically valid (though unusual)
-  if (obj.observations.length === 0) {
+  if (value.observations.length === 0) {
     return true;
   }
 
   // Check first observation has valid structure
-  const firstObs = obj.observations[0] as Record<string, unknown>;
+  const firstObs = value.observations[0] as unknown as Record<string, unknown>;
   if (typeof firstObs !== 'object' || firstObs === null) {
     return false;
   }
@@ -171,67 +146,13 @@ async function extractRefPointsFromZip(
   zipBlob: Blob,
   zipFileName: string
 ): Promise<{ refPoints: ImportedRefPoint[]; errors: string[] }> {
-  const refPoints: ImportedRefPoint[] = [];
-  const errors: string[] = [];
-
-  const zipReader = new ZipReader(new BlobReader(zipBlob));
-
-  try {
-    const entries = await zipReader.getEntries();
-
-    for (const entry of entries) {
-      // Skip directories (they don't have getData)
-      if (entry.directory) {
-        continue;
-      }
-
-      // Skip non-refPoint entries
-      if (!isRefPointEntry(entry.filename)) {
-        continue;
-      }
-
-      try {
-        // Read the JSON content
-        // Note: For file entries, getData is always defined, but TypeScript
-        // doesn't know this after the directory check. We use type assertion.
-        const textWriter = new TextWriter();
-        const jsonText = await entry.getData(textWriter);
-
-        // Parse JSON
-        let parsed: unknown;
-        try {
-          parsed = JSON.parse(jsonText);
-        } catch (parseErr) {
-          errors.push(
-            `${zipFileName}/${entry.filename}: Invalid JSON - ${(parseErr as Error).message}`
-          );
-          continue;
-        }
-
-        // Validate structure
-        if (!isValidRefPointDefinition(parsed)) {
-          errors.push(
-            `${zipFileName}/${entry.filename}: Invalid ref point schema`
-          );
-          continue;
-        }
-
-        // Convert to ImportedRefPoint
-        const imported = toImportedRefPoint(parsed, zipFileName);
-        if (imported) {
-          refPoints.push(imported);
-        }
-      } catch (entryErr) {
-        errors.push(
-          `${zipFileName}/${entry.filename}: ${(entryErr as Error).message}`
-        );
-      }
-    }
-  } finally {
-    await zipReader.close();
-  }
-
-  return { refPoints, errors };
+  const { items, errors } = await extractRefPointEntriesFromZip(
+    zipBlob,
+    zipFileName,
+    isValidRefPointDefinition,
+    (def) => toImportedRefPoint(def, zipFileName)
+  );
+  return { refPoints: items, errors };
 }
 
 // ============================================================================
