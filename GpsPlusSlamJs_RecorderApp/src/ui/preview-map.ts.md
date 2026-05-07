@@ -4,13 +4,15 @@
 
 Lightweight Leaflet-based 2D map for the replay setup screen. Displays a raw GPS path (yellow polyline) when a recording session is selected, so the user can preview where the recording took place before starting replay.
 
+For each GPS event whose `latLongAccuracy` is known, an additional transparent yellow `L.circle` is drawn under the polyline with `radius = accuracy` (meters). Larger circles indicate noisier fixes — making it visually obvious which events were accurate without requiring the user to inspect the data.
+
 ## Public API
 
 | Export                                 | Type                                                                 | Description                                                                                            |
 | -------------------------------------- | -------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------ |
 | `createPreviewMap(container, gpsPath)` | `(HTMLElement \| null, GpsPathCoord[]) → PreviewMapInstance \| null` | Creates a Leaflet map with a yellow polyline. Returns `null` if container is null or gpsPath is empty. |
 | `PreviewMapInstance`                   | interface                                                            | `{ destroy(): void }` — call to remove the Leaflet map and release resources. Idempotent.              |
-| `GpsPathCoord`                         | type (re-export)                                                     | `{ lat: number; lng: number }` from `zip-reader.ts`                                                    |
+| `GpsPathCoord`                         | type (re-export)                                                     | `{ lat: number; lng: number; accuracy?: number }` from `zip-reader.ts`                                 |
 
 ## Invariants & Assumptions
 

@@ -14,6 +14,7 @@ import { formatFileSize } from 'gps-plus-slam-app-framework/utils/format-file-si
 import { getRequiredElement } from '../utils/dom-helpers';
 import type {
   GpsCoord,
+  RawGpsSample,
   RefPointMarker,
 } from 'gps-plus-slam-app-framework/types/geo-types';
 
@@ -56,10 +57,12 @@ export interface SessionSummaryData {
    */
   readonly failedWriteCount?: number;
   /**
-   * Full raw GPS path for map visualization.
+   * Full raw GPS path for map visualization. Per-event accuracy (when
+   * available) is rendered as a transparent circle on the 2D map so users
+   * can tell accurate fixes from noisy ones.
    * User Feedback Issue #4 (2026-01-27): Show recorded path in summary.
    */
-  readonly rawGpsPath?: GpsCoord[];
+  readonly rawGpsPath?: RawGpsSample[];
   /**
    * Full fused/aligned path for map visualization.
    * User Feedback Issue #4 (2026-01-27): Show recorded path in summary.

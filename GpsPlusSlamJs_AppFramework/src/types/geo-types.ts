@@ -20,6 +20,22 @@ export interface GpsCoord {
 }
 
 /**
+ * A raw GPS sample with optional accuracy (1σ horizontal radius in meters,
+ * mirroring the browser's `GeolocationCoordinates.accuracy`).
+ *
+ * Used for 2D map visualizations that draw a per-event accuracy circle
+ * alongside the GPS polyline so that low-quality fixes (large radius) are
+ * visually distinguishable from accurate fixes (small radius).
+ */
+export interface RawGpsSample extends GpsCoord {
+  /**
+   * Horizontal accuracy in meters (1σ / 68% confidence).
+   * `undefined` when the source GPS event lacked the field.
+   */
+  readonly accuracy?: number;
+}
+
+/**
  * A reference point with GPS location and a human-readable name.
  * Extends GpsCoord so it is usable wherever GpsCoord is expected.
  */

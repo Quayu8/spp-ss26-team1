@@ -39,10 +39,10 @@ export const ALIGNMENT_SNAPSHOT_COLOR = '#ff0000'; // Red — alignment snapshot
 
 ```typescript
 // Imported from types/geo-types.ts (re-exported)
-import type { GpsCoord, RefPointMarker } from '../types/geo-types';
+import type { GpsCoord, RawGpsSample, RefPointMarker } from '../types/geo-types';
 
 interface SummaryMapData {
-  rawGpsPath: GpsCoord[]; // Yellow polyline
+  rawGpsPath: RawGpsSample[]; // Yellow polyline + per-event accuracy circles (when accuracy is set)
   fusedPath: GpsCoord[]; // Cyan polyline
   referencePoints: RefPointMarker[];
   alignmentSnapshots?: GpsCoord[]; // Red polyline from alignment-update snapshots
@@ -61,6 +61,7 @@ interface SummaryMapInstance {
 | Element                 | Color              | Description                            |
 | ----------------------- | ------------------ | -------------------------------------- |
 | Raw GPS Polyline        | `#ffff00` (yellow) | Raw GPS readings from device           |
+| Raw GPS Accuracy Circle | `#ffff00` (yellow, ~12% fill) | Per-event horizontal accuracy (radius = `latLongAccuracy` in meters); skipped when accuracy is missing or non-positive |
 | Fused Path Polyline     | `#00ffff` (cyan)   | GPS+SLAM aligned positions             |
 | Reference Point Markers | `#ff6b6b` (red)    | Clickable markers with name popup      |
 | Alignment Snapshots     | `#ff0000` (red)    | Polyline connecting snapshot positions |

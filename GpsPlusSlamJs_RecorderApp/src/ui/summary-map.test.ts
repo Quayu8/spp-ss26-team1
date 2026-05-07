@@ -28,6 +28,7 @@ let polylineCalls: Array<{ latLngs: unknown; options: unknown }> = [];
 let markerCalls: Array<{ latLng: unknown; options: unknown }> = [];
 let tileLayerCalls: Array<{ url: unknown; options: unknown }> = [];
 let bindPopupArgs: unknown[] = [];
+let circleCalls: Array<{ latLng: unknown; options: unknown }> = [];
 
 // Mock Leaflet before importing the module under test
 vi.mock('leaflet', () => {
@@ -73,6 +74,13 @@ vi.mock('leaflet', () => {
         extend: vi.fn().mockReturnThis(),
       })),
       divIcon: vi.fn(() => ({})),
+      circle: vi.fn((latLng: unknown, options: unknown) => {
+        circleCalls.push({ latLng, options });
+        return {
+          addTo: vi.fn().mockReturnThis(),
+          remove: vi.fn(),
+        };
+      }),
     },
   };
 });
@@ -132,6 +140,7 @@ describe('SummaryMap', () => {
     markerCalls = [];
     tileLayerCalls = [];
     bindPopupArgs = [];
+    circleCalls = [];
     vi.clearAllMocks();
   });
 
@@ -311,6 +320,66 @@ describe('SummaryMap', () => {
 
       // Only one polyline (raw GPS)
       expect(polylineCalls.length).toBe(1);
+    });
+  });
+
+  describe('per-event accuracy circles', () => {
+    // Why this suite matters:
+    // The polyline alone hides per-event GPS accuracy — accurate fixes and
+    // 50-meter-noisy fixes look identical on the line. We add a transparent
+    // L.circle (radius = horizontal accuracy in meters) per raw GPS event so
+    // users can visually distinguish them on the 2D map.
+
+    it('does not draw any circles when no raw GPS sample has accuracy', () => {
+      const data: SummaryMapData = {
+        rawGpsPath: [
+          { lat: 50.0, lng: 8.0 },
+          { lat: 50.001, lng: 8.001 },
+        ],
+        fusedPath: [],
+        referencePoints: [],
+      };
+      createSummaryMap(container, data);
+      expect(circleCalls.length).toBe(0);
+    });
+
+    it('draws one transparent yellow circle per raw GPS event with a positive accuracy', () => {
+      const data: SummaryMapData = {
+        rawGpsPath: [
+          { lat: 50.0, lng: 8.0, accuracy: 4 },
+          { lat: 50.001, lng: 8.001, accuracy: 30 },
+        ],
+        fusedPath: [],
+        referencePoints: [],
+      };
+      createSummaryMap(container, data);
+
+      expect(circleCalls.length).toBe(2);
+      expect(circleCalls[0].latLng).toEqual([50.0, 8.0]);
+      expect(circleCalls[0].options).toMatchObject({
+        radius: 4,
+        color: RAW_GPS_COLOR,
+        fillColor: RAW_GPS_COLOR,
+      });
+      expect(circleCalls[1].options).toMatchObject({ radius: 30 });
+      const opts0 = circleCalls[0].options as { fillOpacity: number };
+      expect(opts0.fillOpacity).toBeLessThan(0.5);
+    });
+
+    it('skips circles for non-positive / NaN accuracy values', () => {
+      const data: SummaryMapData = {
+        rawGpsPath: [
+          { lat: 50.0, lng: 8.0, accuracy: 0 },
+          { lat: 50.001, lng: 8.001, accuracy: -5 },
+          { lat: 50.002, lng: 8.002, accuracy: Number.NaN },
+          { lat: 50.003, lng: 8.003, accuracy: 12 },
+        ],
+        fusedPath: [],
+        referencePoints: [],
+      };
+      createSummaryMap(container, data);
+      expect(circleCalls.length).toBe(1);
+      expect(circleCalls[0].options).toMatchObject({ radius: 12 });
     });
   });
 
@@ -516,6 +585,7 @@ describe('SummaryMap fullscreen toggle', () => {
     markerCalls = [];
     tileLayerCalls = [];
     bindPopupArgs = [];
+    circleCalls = [];
     vi.clearAllMocks();
   });
 

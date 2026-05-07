@@ -256,6 +256,11 @@ export async function loadSessionMetadataFromBlob(
 export interface GpsPathCoord {
   readonly lat: number;
   readonly lng: number;
+  /**
+   * Horizontal accuracy in meters (1σ), if the source GPS event included it.
+   * Used by 2D-map previews to draw a per-event accuracy circle.
+   */
+  readonly accuracy?: number;
 }
 
 /**
@@ -300,8 +305,16 @@ export async function loadGpsPathFromBlob(
       let action: {
         type?: string;
         payload?: {
-          gpsPoint?: { latitude?: number; longitude?: number };
-          rawGpsPoint?: { latitude?: number; longitude?: number };
+          gpsPoint?: {
+            latitude?: number;
+            longitude?: number;
+            latLongAccuracy?: number;
+          };
+          rawGpsPoint?: {
+            latitude?: number;
+            longitude?: number;
+            latLongAccuracy?: number;
+          };
         };
       };
       try {
@@ -318,9 +331,14 @@ export async function loadGpsPathFromBlob(
         typeof gps.latitude === 'number' &&
         typeof gps.longitude === 'number'
       ) {
+        const accuracy =
+          typeof gps.latLongAccuracy === 'number' && gps.latLongAccuracy > 0
+            ? gps.latLongAccuracy
+            : undefined;
         coords.push({
           lat: gps.latitude,
           lng: gps.longitude,
+          ...(accuracy !== undefined ? { accuracy } : {}),
         });
       }
     }

@@ -609,6 +609,9 @@ export function createRecordingSessionHandlers(
       rawGpsPath: gpsPositions.map((p) => ({
         lat: p.latitude,
         lng: p.longitude,
+        ...(typeof p.latLongAccuracy === 'number' && p.latLongAccuracy > 0
+          ? { accuracy: p.latLongAccuracy }
+          : {}),
       })),
       fusedPath: computeFusedPath({
         odometryPositions: odomPositions,

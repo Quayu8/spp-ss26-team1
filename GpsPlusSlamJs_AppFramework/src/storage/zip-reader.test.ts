@@ -665,4 +665,37 @@ describe('loadGpsPathFromBlob', () => {
       expect(coords[i].lng).toBeGreaterThan(coords[i - 1].lng);
     }
   });
+
+  it('omits accuracy when GPS events do not include latLongAccuracy', async () => {
+    // Why: pre-accuracy recordings (and devices that don't report
+    // GeolocationCoordinates.accuracy) must keep working — accuracy stays
+    // undefined rather than being defaulted to 0 (which would render as a
+    // point) or NaN.
+    const zip = await produceTestZip({ gpsEventCount: 2 });
+    const blob = new Blob([zip.zipData as BlobPart]);
+
+    const coords = await loadGpsPathFromBlob(blob);
+
+    expect(coords).toHaveLength(2);
+    for (const c of coords) {
+      expect(c.accuracy).toBeUndefined();
+    }
+  });
+
+  it('extracts latLongAccuracy from GPS events when present', async () => {
+    // Why: the 2D map preview draws a per-event accuracy circle. Without
+    // this extraction the preview would have no accuracy data to visualize.
+    const zip = await produceTestZip({
+      gpsEventCount: 3,
+      gpsAccuracy: 7.5,
+    });
+    const blob = new Blob([zip.zipData as BlobPart]);
+
+    const coords = await loadGpsPathFromBlob(blob);
+
+    expect(coords).toHaveLength(3);
+    for (const c of coords) {
+      expect(c.accuracy).toBe(7.5);
+    }
+  });
 });
