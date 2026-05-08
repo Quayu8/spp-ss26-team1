@@ -166,6 +166,30 @@ const blob = await exportSessionAsZip(sessionHandle, {
 });
 ```
 
+## Scene-Graph Convention
+
+The framework's WebXR scene is laid out so that the **scene root is GPS-aligned (NUE) space**:
+
+```
+scene                             ← GPS-aligned (NUE) space, the scene root
+├── arWorldGroup                  ← carries the alignment matrix (GPS → AR)
+│   ├── camera                    ← WebXR XRViewerPose (raw AR pose)
+│   └── ar-content                ← anything fixed in AR space
+│                                   (planes, point clouds, hit-test reticles, …)
+└── ..objects with gps coords..   ← anything anchored to GPS coordinates
+                                    (waypoints, POIs, navigation arrows, …)
+```
+
+When the alignment solver produces a new matrix, the framework writes it to `arWorldGroup.matrix`. The camera moves with `arWorldGroup`; objects parented directly to `scene` do not.
+
+**Three options for placing your own `Object3D`:**
+
+1. **Add it to `scene`** (with NUE-meter coordinates from `calcRelativeCoordsInMeters(zeroRef, …)`). The object's world pose stays at the correct latitude/longitude/altitude forever, but every time the alignment matrix is corrected the camera shifts inside `arWorldGroup`, so from the user's AR view the object visually "floats". Cheap and correct, but ugly during corrections — fine for small markers (e.g. ref-point spheres, the built-in `GpsAnchoredMeshManager` does this), not great for richer GPS-anchored content.
+2. **Add it to `arWorldGroup`** with a fixed local transform. The object is frozen relative to AR-tracked content and never visually moves — but its world / GPS pose drifts every time alignment is corrected. Only useful for content that is logically tied to AR features rather than to a GPS coordinate (e.g. a hit-test reticle, an indicator stuck to a detected plane).
+3. **Add it to `arWorldGroup` and re-derive its local pose on every alignment update** so the resulting world pose stays at the target GPS coordinate. This is the visually-best way to keep an object "at its GPS position": the object never floats, and re-snaps to the new local coordinates inside `arWorldGroup` each time alignment changes. The C# Unity stack ships a dedicated `GpsAnchor` component for exactly this pattern; the JS framework has the underlying primitives (`captureGpsAnchorSample`, `calcRelativeCoordsInMeters`, the alignment matrix on `arWorldGroup`) and a generic `GpsAnchor` Three.js port is on the roadmap. Until then, callers can implement the snap themselves in their alignment subscriber.
+
+The generic `GpsAnchoredMeshManager` in `visualization/` uses option 1 (parents its spheres to `scene`).
+
 ## Modules
 
 ### `ar/` — WebXR & 3D Scene
