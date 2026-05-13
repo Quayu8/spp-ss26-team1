@@ -28,6 +28,24 @@ export {
   createGpsCompassCubes,
 } from './gps-compass-cubes.js';
 
+// --- frustum-visibility ---
+export {
+  buildCameraFrustum,
+  isObjectInCameraFrustum,
+  isPointInCameraFrustum,
+  isSphereInCameraFrustum,
+} from './frustum-visibility.js';
+
+// --- gps-anchor ---
+export {
+  type GpsAnchor,
+  type GpsAnchorMode,
+  type GpsAnchorOptions,
+  type GpsAnchorPhase,
+  type GpsAnchorSamplePoint,
+  createGpsAnchor,
+} from './gps-anchor.js';
+
 // --- gps-event-markers ---
 export { GpsEventVisualizer, gpsEventVisualizer } from './gps-event-markers.js';
 

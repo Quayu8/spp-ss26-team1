@@ -72,3 +72,7 @@ empty-input cleanup, idempotent update on unchanged coords.
   reconcilers.
 - [boundary analysis Iter 4+](../../../../../gps-plus-slam/GpsPlusSlamJs_Docs/docs/2026-05-03-appframework-vs-recorderapp-boundary-analysis.md) —
   why this lives in the recorder, not the framework.
+- [GpsAnchor port plan](../../../../../gps-plus-slam/GpsPlusSlamJs_Docs/docs/2026-05-13-gps-anchor-port-plan.md) —
+  the single-object counterpart for cases where the user cares about
+  visual stability (`'snap-when-offscreen'` UX) rather than bulk-mesh
+  efficiency.

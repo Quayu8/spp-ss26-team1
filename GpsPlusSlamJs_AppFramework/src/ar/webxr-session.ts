@@ -39,6 +39,7 @@ import {
 } from './depth-sampler';
 import { CameraBlitCapture, computeCaptureSize } from './camera-blit-capture';
 import { acquireCameraTexture } from './xr-camera-texture';
+import { clearFrameUpdates, runFrameUpdates } from './frame-loop';
 import {
   type OdometryTrackingRestartedPayload,
   nueToWebXR as _nueToWebXR,
@@ -143,6 +144,14 @@ let camera: THREE.PerspectiveCamera | null = null;
 let xrSession: XRSession | null = null;
 
 /**
+ * Monotonic time of the previous XR frame, in milliseconds (XR `time`
+ * argument). Reset to 0 by `resetWebXRState()` so the first frame of a
+ * new session sees `dt = 0` rather than a stale delta from the prior
+ * session.
+ */
+let lastFrameTime = 0;
+
+/**
  * Reset WebXR module state - exported for testing only.
  * @internal
  */
@@ -162,6 +171,8 @@ export function resetWebXRState(): void {
   arWorldGroup = null;
   arPoseNode = null;
   latestArPose = null;
+  lastFrameTime = 0;
+  clearFrameUpdates();
   imageCaptureManager = null;
   onImageCaptured = null;
   getScreenRotation = null;
@@ -738,6 +749,16 @@ function onXRFrame(time: number, frame: XRFrame | undefined): void {
 
   // Update tracking state manager
   updateTrackingState(arPose);
+
+  // Tick the per-frame callback registry. `dt`/`elapsed` are derived from
+  // the XR `time` argument (monotonic ms since session start) — not from
+  // `THREE.Clock` — so replay/test harnesses that drive `onXRFrame` with
+  // synthetic timestamps see deterministic ticks. See `frame-loop.ts.md`
+  // and `2026-05-13-ecs-migration-plan.md`.
+  const dt = lastFrameTime === 0 ? 0 : (time - lastFrameTime) / 1000;
+  const elapsed = time / 1000;
+  lastFrameTime = time;
+  runFrameUpdates(dt, elapsed);
 
   if (arPose) {
     // Store the latest pose for getCurrentArPose()

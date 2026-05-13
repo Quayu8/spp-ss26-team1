@@ -33,6 +33,12 @@ export {
   DepthSampler,
 } from './depth-sampler.js';
 
+// --- frame-loop ---
+export {
+  type FrameUpdate,
+  registerFrameUpdate,
+} from './frame-loop.js';
+
 // --- image-capture ---
 export {
   MIN_VALID_IMAGE_BYTES,
