@@ -63,7 +63,7 @@ object as an `@internal` testing seam in lieu of pumping the global
   median is more robust to single-axis spikes than a vector median.
 - **Sampling rate is 1 Hz**: at most one sample collected per second
   of wall-clock `elapsed`. The `secondsToAccumulateGpsPose` field is
-  the *sample count* (default 7), not the window length — together
+  the _sample count_ (default 7), not the window length — together
   with 1 Hz sampling this is also the window length in the default
   case.
 - **`getCurrentGpsPoint` returning null is a non-error**: the tick is
@@ -83,7 +83,7 @@ const anchor = createGpsAnchor({
   object3D: myMesh,
   arWorldGroup,
   camera,
-  gpsPoint: { lat: 48.0, lon: 11.0 },  // seed
+  gpsPoint: { lat: 48.0, lon: 11.0 }, // seed
   getAlignmentMatrix: () => store.getState().gpsData.alignmentMatrix,
   getGpsZeroRef: () => store.getState().gpsData.zero,
   getCurrentGpsPoint: () => store.getState().gpsData.latest?.position ?? null,

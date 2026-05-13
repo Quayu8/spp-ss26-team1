@@ -52,30 +52,30 @@ describe('buildCameraFrustum', () => {
 describe('isPointInCameraFrustum', () => {
   it('returns true for a point straight ahead inside near/far', () => {
     const camera = makeCamera();
-    expect(
-      isPointInCameraFrustum(camera, new THREE.Vector3(0, 0, -5))
-    ).toBe(true);
+    expect(isPointInCameraFrustum(camera, new THREE.Vector3(0, 0, -5))).toBe(
+      true
+    );
   });
 
   it('returns false for a point behind the camera', () => {
     const camera = makeCamera();
-    expect(
-      isPointInCameraFrustum(camera, new THREE.Vector3(0, 0, 5))
-    ).toBe(false);
+    expect(isPointInCameraFrustum(camera, new THREE.Vector3(0, 0, 5))).toBe(
+      false
+    );
   });
 
   it('returns false for a point past the far plane', () => {
     const camera = makeCamera();
-    expect(
-      isPointInCameraFrustum(camera, new THREE.Vector3(0, 0, -1000))
-    ).toBe(false);
+    expect(isPointInCameraFrustum(camera, new THREE.Vector3(0, 0, -1000))).toBe(
+      false
+    );
   });
 
   it('returns false for a point far to the side outside the FOV', () => {
     const camera = makeCamera();
-    expect(
-      isPointInCameraFrustum(camera, new THREE.Vector3(100, 0, -5))
-    ).toBe(false);
+    expect(isPointInCameraFrustum(camera, new THREE.Vector3(100, 0, -5))).toBe(
+      false
+    );
   });
 
   it('reuses the provided frustum without rebuilding it', () => {

@@ -18,10 +18,7 @@
  */
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import * as THREE from 'three';
-import {
-  createGpsAnchor,
-  type GpsAnchorSamplePoint,
-} from './gps-anchor.js';
+import { createGpsAnchor, type GpsAnchorSamplePoint } from './gps-anchor.js';
 import { clearFrameUpdates } from '../ar/frame-loop.js';
 
 function makeAnchorEnv() {
@@ -212,9 +209,10 @@ describe('createGpsAnchor — bootstrap', () => {
 
   it('`dispose()` unregisters the anchor from the global frame loop', async () => {
     const env = makeAnchorEnv();
-    const getCurrentGpsPoint = vi.fn<() => GpsAnchorSamplePoint | null>(
-      () => ({ lat: 48.0, lon: 11.0 })
-    );
+    const getCurrentGpsPoint = vi.fn<() => GpsAnchorSamplePoint | null>(() => ({
+      lat: 48.0,
+      lon: 11.0,
+    }));
     const anchor = createGpsAnchor({
       ...env,
       gpsPoint: { lat: 48.0, lon: 11.0 },
@@ -284,7 +282,8 @@ describe('createGpsAnchor — steady state (snap-every-tick)', () => {
       gpsPoint: target,
       skipBootstrap: true,
       mode: 'snap-every-tick',
-      getAlignmentMatrix: () => Array.from({ length: 16 }, (_, i) => (i % 5 === 0 ? 1 : 0)),
+      getAlignmentMatrix: () =>
+        Array.from({ length: 16 }, (_, i) => (i % 5 === 0 ? 1 : 0)),
       getGpsZeroRef: () => zero,
       getCurrentGpsPoint: () => null,
     });
@@ -304,7 +303,8 @@ describe('createGpsAnchor — steady state (snap-every-tick)', () => {
       ...env,
       gpsPoint: { lat: 48.001, lon: 11.0 },
       mode: 'snap-every-tick',
-      getAlignmentMatrix: () => Array.from({ length: 16 }, (_, i) => (i % 5 === 0 ? 1 : 0)),
+      getAlignmentMatrix: () =>
+        Array.from({ length: 16 }, (_, i) => (i % 5 === 0 ? 1 : 0)),
       getGpsZeroRef: () => ({ lat: 48.0, lon: 11.0 }),
       getCurrentGpsPoint: () => null,
     });
@@ -324,7 +324,8 @@ describe('createGpsAnchor — steady state (snap-every-tick)', () => {
       gpsPoint: zero, // target == zero → local (0,0,0)
       skipBootstrap: true,
       mode: 'snap-every-tick',
-      getAlignmentMatrix: () => Array.from({ length: 16 }, (_, i) => (i % 5 === 0 ? 1 : 0)),
+      getAlignmentMatrix: () =>
+        Array.from({ length: 16 }, (_, i) => (i % 5 === 0 ? 1 : 0)),
       getGpsZeroRef: () => zero,
       getCurrentGpsPoint: () => null,
     });
@@ -350,7 +351,8 @@ describe('createGpsAnchor — steady state (snap-every-tick)', () => {
       mode: 'snap-every-tick',
       // Camera at origin, object commits to (0,0,0), so distanceFromCamera=0 → scale=1
       // and the default 2 m threshold applies as-is.
-      getAlignmentMatrix: () => Array.from({ length: 16 }, (_, i) => (i % 5 === 0 ? 1 : 0)),
+      getAlignmentMatrix: () =>
+        Array.from({ length: 16 }, (_, i) => (i % 5 === 0 ? 1 : 0)),
       getGpsZeroRef: () => zero,
       getCurrentGpsPoint: () => null,
     });
@@ -377,7 +379,8 @@ describe('createGpsAnchor — steady state (snap-every-tick)', () => {
         gpsPoint: zero,
         skipBootstrap: true,
         mode: 'snap-every-tick',
-        getAlignmentMatrix: () => Array.from({ length: 16 }, (_, i) => (i % 5 === 0 ? 1 : 0)),
+        getAlignmentMatrix: () =>
+          Array.from({ length: 16 }, (_, i) => (i % 5 === 0 ? 1 : 0)),
         getGpsZeroRef: () => zero,
         getCurrentGpsPoint: () => null,
       });
@@ -399,7 +402,8 @@ describe('createGpsAnchor — steady state (snap-every-tick)', () => {
         gpsPoint: farTarget,
         skipBootstrap: true,
         mode: 'snap-every-tick',
-        getAlignmentMatrix: () => Array.from({ length: 16 }, (_, i) => (i % 5 === 0 ? 1 : 0)),
+        getAlignmentMatrix: () =>
+          Array.from({ length: 16 }, (_, i) => (i % 5 === 0 ? 1 : 0)),
         getGpsZeroRef: () => zero,
         getCurrentGpsPoint: () => null,
       });
@@ -460,20 +464,16 @@ function makeMeshAnchorEnv() {
 }
 
 const IDENTITY_MATRIX16: readonly number[] = [
-  1, 0, 0, 0,
-  0, 1, 0, 0,
-  0, 0, 1, 0,
-  0, 0, 0, 1,
+  1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1,
 ];
 
-function translationMatrix16(tx: number, ty: number, tz: number): readonly number[] {
+function translationMatrix16(
+  tx: number,
+  ty: number,
+  tz: number
+): readonly number[] {
   // Column-major 4×4 with translation in the last column.
-  return [
-    1, 0, 0, 0,
-    0, 1, 0, 0,
-    0, 0, 1, 0,
-    tx, ty, tz, 1,
-  ];
+  return [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, tx, ty, tz, 1];
 }
 
 function setupSceneFor(env: ReturnType<typeof makeMeshAnchorEnv>): void {
@@ -625,10 +625,22 @@ describe('createGpsAnchor — steady state (snap-when-offscreen)', () => {
     const c = Math.cos(angle);
     const s = Math.sin(angle);
     const rotated: readonly number[] = [
-      c, 0, -s, 0,
-      0, 1, 0, 0,
-      s, 0, c, 0,
-      0, 0, 0, 1,
+      c,
+      0,
+      -s,
+      0,
+      0,
+      1,
+      0,
+      0,
+      s,
+      0,
+      c,
+      0,
+      0,
+      0,
+      0,
+      1,
     ];
     let matrix: readonly number[] = IDENTITY_MATRIX16;
     const anchor = createGpsAnchor({
@@ -747,5 +759,3 @@ describe('createGpsAnchor — re-bootstrap on external move', () => {
     anchor.dispose();
   });
 });
-
-

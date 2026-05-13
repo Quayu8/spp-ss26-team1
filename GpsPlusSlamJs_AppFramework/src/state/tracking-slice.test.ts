@@ -337,10 +337,12 @@ describe('trackingSlice — Case 2: relocalization', () => {
       poseReceived({ pose: initialPose, sensorOrientation: defaultOrientation })
     );
     store.dispatch(poseLost());
-    store.dispatch(originReset({
-      position: [1, 0, 0],
-      orientation: [0, 0, 0, 1],
-    }));
+    store.dispatch(
+      originReset({
+        position: [1, 0, 0],
+        orientation: [0, 0, 0, 1],
+      })
+    );
     store.dispatch(
       poseReceived({ pose: newPose, sensorOrientation: defaultOrientation })
     );

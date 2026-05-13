@@ -48,7 +48,10 @@ const store = configureStore({ reducer: { tracking: trackingReducer } });
 // New frame with a valid pose:
 store.dispatch(
   poseReceived({
-    pose: { position: { x: 0, y: 0, z: 0 }, orientation: { x: 0, y: 0, z: 0, w: 1 } },
+    pose: {
+      position: { x: 0, y: 0, z: 0 },
+      orientation: { x: 0, y: 0, z: 0, w: 1 },
+    },
     sensorOrientation: { alpha: 90, beta: 0, gamma: 0, absolute: true },
   })
 );
@@ -58,7 +61,10 @@ store.dispatch(poseLost());
 store.dispatch(originReset({ position: [0, 0, 0], orientation: [0, 0, 0, 1] }));
 store.dispatch(
   poseReceived({
-    pose: { position: { x: 1, y: 0, z: 0 }, orientation: { x: 0, y: 0, z: 0, w: 1 } },
+    pose: {
+      position: { x: 1, y: 0, z: 0 },
+      orientation: { x: 0, y: 0, z: 0, w: 1 },
+    },
     sensorOrientation: { alpha: 90, beta: 0, gamma: 0, absolute: true },
   })
 );

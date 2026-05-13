@@ -11,7 +11,11 @@
  * bypass). Floor-Y correction is sub-step 6 and remains deferred.
  */
 import * as THREE from 'three';
-import { calcRelativeCoordsInMeters, type LatLong, type LatLongAlt } from '../core/index.js';
+import {
+  calcRelativeCoordsInMeters,
+  type LatLong,
+  type LatLongAlt,
+} from '../core/index.js';
 import { registerFrameUpdate } from '../ar/frame-loop.js';
 import { isObjectInCameraFrustum } from './frustum-visibility.js';
 
@@ -85,7 +89,9 @@ function median(values: number[]): number {
   return sorted[mid]!;
 }
 
-function medianPoint(samples: readonly GpsAnchorSamplePoint[]): LatLong | LatLongAlt {
+function medianPoint(
+  samples: readonly GpsAnchorSamplePoint[]
+): LatLong | LatLongAlt {
   const lat = median(samples.map((s) => s.lat));
   const lon = median(samples.map((s) => s.lon));
   const alts = samples
@@ -135,7 +141,8 @@ export function createGpsAnchor(options: GpsAnchorOptions): GpsAnchor {
   const scratchPrevQuat = new THREE.Quaternion();
   const scratchCurrQuat = new THREE.Quaternion();
 
-  let phase: GpsAnchorPhase = options.skipBootstrap === true ? 'anchored' : 'bootstrap';
+  let phase: GpsAnchorPhase =
+    options.skipBootstrap === true ? 'anchored' : 'bootstrap';
   let isFullyAnchored = phase === 'anchored';
   let gpsPoint: LatLong | LatLongAlt = options.gpsPoint;
   let phaseEnteredAtElapsed: number | null = null;
@@ -206,15 +213,19 @@ export function createGpsAnchor(options: GpsAnchorOptions): GpsAnchor {
     const zero = options.getGpsZeroRef();
     if (zero === null || zero === undefined) return;
     const currentAlignment = options.getAlignmentMatrix();
-    const largeJump = detectLargeAlignmentJump(prevAlignmentMatrix, currentAlignment);
+    const largeJump = detectLargeAlignmentJump(
+      prevAlignmentMatrix,
+      currentAlignment
+    );
     // Update the snapshot for the next tick BEFORE any early-returns so
     // jump detection on subsequent ticks compares against the most
     // recent matrix the anchor actually saw.
     prevAlignmentMatrix = currentAlignment;
 
-    const targetAlt = 'altitude' in gpsPoint && typeof gpsPoint.altitude === 'number'
-      ? gpsPoint.altitude
-      : 0;
+    const targetAlt =
+      'altitude' in gpsPoint && typeof gpsPoint.altitude === 'number'
+        ? gpsPoint.altitude
+        : 0;
     const nue = calcRelativeCoordsInMeters(zero, gpsPoint, targetAlt, 0);
     scratchTarget.set(nue[0]!, nue[1]!, nue[2]!);
 
@@ -248,7 +259,8 @@ export function createGpsAnchor(options: GpsAnchorOptions): GpsAnchor {
     // Settling window: ignore samples until it elapses.
     if (elapsed - phaseEnteredAtElapsed < settlingSeconds) return;
     // Sample at most once per second.
-    if (lastSampleAtElapsed !== null && elapsed - lastSampleAtElapsed < 1) return;
+    if (lastSampleAtElapsed !== null && elapsed - lastSampleAtElapsed < 1)
+      return;
     const sample = options.getCurrentGpsPoint();
     if (sample === null || sample === undefined) return;
     samples.push(sample);

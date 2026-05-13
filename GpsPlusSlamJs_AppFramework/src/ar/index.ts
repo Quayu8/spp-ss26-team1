@@ -34,10 +34,7 @@ export {
 } from './depth-sampler.js';
 
 // --- frame-loop ---
-export {
-  type FrameUpdate,
-  registerFrameUpdate,
-} from './frame-loop.js';
+export { type FrameUpdate, registerFrameUpdate } from './frame-loop.js';
 
 // --- image-capture ---
 export {
