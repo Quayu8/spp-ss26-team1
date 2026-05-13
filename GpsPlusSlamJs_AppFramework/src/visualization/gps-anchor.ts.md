@@ -18,13 +18,13 @@ parenting rules see the dedicated port plan:
 
 ## Status
 
-This file currently implements **sub-step 2 (bootstrap phase)** of the
-port plan. The steady-state recompute loop (sub-steps 3, 4), explicit
-floor correction (sub-step 6), and the alignment-matrix delta tracking
-that powers the large-jump bypass are not yet wired up — they are
-follow-up TDD iterations in the same file. The public API is the
-final shape so consumers do not need to change as later sub-steps
-land.
+This file currently implements **sub-steps 2 (bootstrap phase),
+3 (steady-state `'snap-every-tick'` + distance-scaled threshold gate),
+4 (`'snap-when-offscreen'` mode gate + alignment-matrix large-jump
+bypass), and 5 (re-bootstrap on external move)** of the port plan.
+Floor-Y correction (sub-step 6) is deferred until the depth raycaster
+(Item 6 in the C# survey) lands; the `floorY?: () => number | null`
+constructor seam is reserved but not yet consulted.
 
 ## Public API
 
@@ -98,15 +98,37 @@ anchor.markMovedExternally();
 
 See [gps-anchor.test.ts](gps-anchor.test.ts). Coverage:
 
-- Initial phase + isFullyAnchored.
-- `skipBootstrap: true` short-circuit.
-- 1 Hz sampling and median commit at the configured count.
-- Median robustness against a single outlier.
-- `settlingSeconds` window correctly suppresses sampling.
-- `null` GPS reading: tick is skipped, not counted as a sample.
-- `markMovedExternally` resets the buffer and re-bootstraps.
-- `dispose` unregisters from the frame loop.
-- Nested-anchor detection throws.
+- Bootstrap (sub-step 2):
+  - Initial phase + `isFullyAnchored`.
+  - `skipBootstrap: true` short-circuit.
+  - 1 Hz sampling and median commit at the configured count.
+  - Median robustness against a single outlier.
+  - `settlingSeconds` window correctly suppresses sampling.
+  - `null` GPS reading: tick is skipped, not counted as a sample.
+  - `markMovedExternally` resets the buffer and re-bootstraps.
+  - `dispose` unregisters from the frame loop.
+  - Nested-anchor detection throws.
+- Steady state — `'snap-every-tick'` (sub-step 3):
+  - NUE target committed on the first tick after bootstrap.
+  - No position writes while still in the bootstrap phase.
+  - `setGpsPoint` triggers re-commit past the threshold gate.
+  - Sub-threshold delta does NOT commit.
+  - Distance-scaled threshold: same delta commits up close, skips far
+    away.
+  - `null` `zeroRef` suppresses the commit.
+- Steady state — `'snap-when-offscreen'` + large-jump bypass (sub-step 4):
+  - On-screen object: no commit even when threshold gate would allow.
+  - Off-screen object: commits.
+  - 10 m translation jump bypasses the on-screen mode gate.
+  - 1 m translation does NOT bypass.
+  - 25 m Y-only jump bypasses.
+  - 30° rotation jump bypasses.
+- Re-bootstrap on external move (sub-step 5):
+  - No position writes while back in bootstrap; resumes with the
+    new median target once re-anchored.
+  - Large-jump baseline is cleared on `markMovedExternally` so the
+    first steady-state tick after re-bootstrap doesn't spuriously
+    trigger the bypass.
 
 ## Related docs
 

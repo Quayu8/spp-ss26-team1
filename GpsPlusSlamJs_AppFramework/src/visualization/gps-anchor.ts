@@ -5,14 +5,15 @@
  * `gps-plus-slam/GpsPlusSlamJs_Docs/docs/2026-05-13-gps-anchor-port-plan.md`
  * for the full design, state machine, and test matrix.
  *
- * This file implements **sub-step 2 (bootstrap phase)** of that plan.
- * The steady-state recompute loop (sub-steps 3+) lives in a later
- * iteration; this file deliberately keeps the `anchored` phase a no-op
- * beyond exposing `gpsPoint` and `isFullyAnchored`.
+ * This file implements sub-steps 2 (bootstrap phase), 3 (steady-state
+ * `'snap-every-tick'` + distance-scaled threshold gate), and 4
+ * (`'snap-when-offscreen'` mode gate + alignment-matrix large-jump
+ * bypass). Floor-Y correction is sub-step 6 and remains deferred.
  */
-import type * as THREE from 'three';
-import type { LatLong, LatLongAlt } from '../core/index.js';
+import * as THREE from 'three';
+import { calcRelativeCoordsInMeters, type LatLong, type LatLongAlt } from '../core/index.js';
 import { registerFrameUpdate } from '../ar/frame-loop.js';
+import { isObjectInCameraFrustum } from './frustum-visibility.js';
 
 export type GpsAnchorMode = 'snap-when-offscreen' | 'snap-every-tick';
 export type GpsAnchorPhase = 'bootstrap' | 'anchored';
@@ -107,6 +108,32 @@ export function createGpsAnchor(options: GpsAnchorOptions): GpsAnchor {
 
   const sampleCount = options.secondsToAccumulateGpsPose ?? 7;
   const settlingSeconds = options.settlingSeconds ?? 0;
+  const distanceThreshold = options.distanceThreshold ?? 2;
+  // Reserved for sub-step 4 (rotation-delta gate). Kept here so the
+  // option is honoured the moment that code lands without re-touching
+  // the constructor.
+  void (options.angleThresholdInDegrees ?? 15);
+  const mode: GpsAnchorMode = options.mode ?? 'snap-when-offscreen';
+
+  // Large-jump thresholds (mirror the C# `ApplyAlignmentMatrixToArOrigin`
+  // constants). When the alignment matrix changes by more than any of
+  // these between two consecutive ticks, the on-screen mode gate is
+  // bypassed for that tick.
+  const LARGE_JUMP_TRANSLATION_M = 4;
+  const LARGE_JUMP_Y_M = 20;
+  const LARGE_JUMP_ROTATION_DEG = 2;
+
+  // Scratch vectors / matrices / quaternions — reused across ticks to
+  // avoid per-frame allocs.
+  const scratchTarget = new THREE.Vector3();
+  const scratchCamWorld = new THREE.Vector3();
+  const scratchObjWorld = new THREE.Vector3();
+  const scratchPrevMatrix = new THREE.Matrix4();
+  const scratchCurrMatrix = new THREE.Matrix4();
+  const scratchPrevTrans = new THREE.Vector3();
+  const scratchCurrTrans = new THREE.Vector3();
+  const scratchPrevQuat = new THREE.Quaternion();
+  const scratchCurrQuat = new THREE.Quaternion();
 
   let phase: GpsAnchorPhase = options.skipBootstrap === true ? 'anchored' : 'bootstrap';
   let isFullyAnchored = phase === 'anchored';
@@ -114,6 +141,40 @@ export function createGpsAnchor(options: GpsAnchorOptions): GpsAnchor {
   let phaseEnteredAtElapsed: number | null = null;
   let lastSampleAtElapsed: number | null = null;
   const samples: GpsAnchorSamplePoint[] = [];
+  /**
+   * Snapshot of the previous tick's alignment matrix. `null` until the
+   * first steady-state tick in which `getAlignmentMatrix()` returned a
+   * non-null value. Used by the large-jump bypass to compare against
+   * the current tick's matrix.
+   */
+  let prevAlignmentMatrix: readonly number[] | null = null;
+
+  /**
+   * Returns true iff the alignment matrix has jumped by more than the
+   * configured large-jump thresholds between `prev` and `curr`. A
+   * `null` `prev` (first tick) is treated as "no jump".
+   */
+  const detectLargeAlignmentJump = (
+    prev: readonly number[] | null,
+    curr: readonly number[] | null
+  ): boolean => {
+    if (prev === null || curr === null) return false;
+    scratchPrevMatrix.fromArray(prev as number[]);
+    scratchCurrMatrix.fromArray(curr as number[]);
+    scratchPrevTrans.setFromMatrixPosition(scratchPrevMatrix);
+    scratchCurrTrans.setFromMatrixPosition(scratchCurrMatrix);
+    const dTrans = scratchPrevTrans.distanceTo(scratchCurrTrans);
+    const dY = Math.abs(scratchCurrTrans.y - scratchPrevTrans.y);
+    scratchPrevQuat.setFromRotationMatrix(scratchPrevMatrix);
+    scratchCurrQuat.setFromRotationMatrix(scratchCurrMatrix);
+    const dRotRad = scratchPrevQuat.angleTo(scratchCurrQuat);
+    const dRotDeg = (dRotRad * 180) / Math.PI;
+    return (
+      dTrans > LARGE_JUMP_TRANSLATION_M ||
+      dY > LARGE_JUMP_Y_M ||
+      dRotDeg > LARGE_JUMP_ROTATION_DEG
+    );
+  };
 
   const enterBootstrap = (): void => {
     phase = 'bootstrap';
@@ -121,6 +182,10 @@ export function createGpsAnchor(options: GpsAnchorOptions): GpsAnchor {
     phaseEnteredAtElapsed = null;
     lastSampleAtElapsed = null;
     samples.length = 0;
+    // Reset the large-jump baseline so the first steady-state tick
+    // after the re-bootstrap doesn't compare against a stale matrix
+    // from before the move.
+    prevAlignmentMatrix = null;
   };
 
   const commitMedian = (): void => {
@@ -130,8 +195,52 @@ export function createGpsAnchor(options: GpsAnchorOptions): GpsAnchor {
     samples.length = 0;
   };
 
+  /**
+   * Steady-state: compute the NUE target from the stored `gpsPoint`
+   * and the current `zeroRef`, and commit it to `object3D.position`
+   * iff the position delta exceeds the distance-scaled threshold AND
+   * the mode gate (with optional large-jump bypass) allows it.
+   * Returns silently on missing inputs.
+   */
+  const maybeCommitSteadyState = (): void => {
+    const zero = options.getGpsZeroRef();
+    if (zero === null || zero === undefined) return;
+    const currentAlignment = options.getAlignmentMatrix();
+    const largeJump = detectLargeAlignmentJump(prevAlignmentMatrix, currentAlignment);
+    // Update the snapshot for the next tick BEFORE any early-returns so
+    // jump detection on subsequent ticks compares against the most
+    // recent matrix the anchor actually saw.
+    prevAlignmentMatrix = currentAlignment;
+
+    const targetAlt = 'altitude' in gpsPoint && typeof gpsPoint.altitude === 'number'
+      ? gpsPoint.altitude
+      : 0;
+    const nue = calcRelativeCoordsInMeters(zero, gpsPoint, targetAlt, 0);
+    scratchTarget.set(nue[0]!, nue[1]!, nue[2]!);
+
+    // Distance-scaled threshold: `scale = 1 + 10 × distanceFromCamera/100`.
+    options.camera.getWorldPosition(scratchCamWorld);
+    options.object3D.getWorldPosition(scratchObjWorld);
+    const distFromCamera = scratchCamWorld.distanceTo(scratchObjWorld);
+    const scale = 1 + (10 * distFromCamera) / 100;
+    const posDelta = options.object3D.position.distanceTo(scratchTarget);
+    if (posDelta < distanceThreshold * scale) return;
+
+    // Mode gate. `'snap-when-offscreen'` suppresses the commit when the
+    // object is currently visible — unless a large alignment-matrix
+    // jump forces us through (the user expects the object to be in the
+    // new "right" place after a big correction).
+    if (mode === 'snap-when-offscreen' && !largeJump) {
+      if (isObjectInCameraFrustum(options.camera, options.object3D)) return;
+    }
+    options.object3D.position.copy(scratchTarget);
+  };
+
   const tick = (_dt: number, elapsed: number): void => {
-    if (phase !== 'bootstrap') return;
+    if (phase === 'anchored') {
+      maybeCommitSteadyState();
+      return;
+    }
     if (phaseEnteredAtElapsed === null) {
       phaseEnteredAtElapsed = elapsed;
       lastSampleAtElapsed = elapsed - 1; // allow a sample on the next tick if no settling
