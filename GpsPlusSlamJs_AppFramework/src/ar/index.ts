@@ -81,6 +81,7 @@ export {
   getImageCaptureFrameCount,
   setTrackingCallbacks,
   setTrackingLostCallback,
+  setTrackingStore,
   setDepthCaptureCallback,
   startDepthCapture,
   stopDepthCapture,

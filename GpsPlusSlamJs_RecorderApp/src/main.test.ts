@@ -455,6 +455,7 @@ vi.mock('gps-plus-slam-app-framework/ar/webxr-session', () => ({
   setTrackingLostCallback: mockSetTrackingLostCallback,
   setTrackingCallbacks: mockSetTrackingCallbacks,
   setTrackingRecoveredCallback: mockSetTrackingRecoveredCallback,
+  setTrackingStore: vi.fn(),
   getScene: vi.fn().mockReturnValue(null),
   getCamera: vi.fn().mockReturnValue(null),
   getArWorldGroup: vi.fn().mockReturnValue(null),

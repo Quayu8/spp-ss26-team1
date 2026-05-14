@@ -26,11 +26,31 @@ import {
   type ImageCaptureConfig,
   DEFAULT_CAPTURE_CONFIG,
 } from './image-capture';
+import type { ResetTransformData } from './tracking-state';
 import {
-  TrackingStateManager,
-  type TrackingStateCallbacks,
-  type ResetTransformData,
-} from './tracking-state';
+  poseReceived as poseReceivedAction,
+  poseLost as poseLostAction,
+  originReset as originResetAction,
+  resetTracking as resetTrackingAction,
+  clearLastRestartedPayload as clearLastRestartedPayloadAction,
+  selectTrackingPhase,
+  selectLastRestartedPayload,
+  type TrackingPhase,
+  type TrackingSliceState,
+} from '../state/tracking-slice';
+
+/**
+ * Minimal subscribable-store contract the tracking pipeline needs:
+ * dispatch the slice actions, read the slice for the restart payload, and
+ * subscribe to phase transitions. Structurally compatible with the full
+ * `SlamAppStore` (and any test double) without coupling this module to the
+ * factory's exact generics.
+ */
+export interface TrackingSubscribableStore {
+  dispatch: (action: { type: string; payload?: unknown }) => unknown;
+  getState: () => { tracking: TrackingSliceState };
+  subscribe: (listener: () => void) => () => void;
+}
 import {
   DepthSampler,
   type DepthSamplerCallbacks,
@@ -178,7 +198,12 @@ export function resetWebXRState(): void {
   getScreenRotation = null;
   onCaptureFailed = null;
   onSuspiciousImage = null;
-  trackingStateManager = null;
+  if (trackingPhaseUnsubscribe) {
+    trackingPhaseUnsubscribe();
+    trackingPhaseUnsubscribe = null;
+  }
+  trackingStore = null;
+  lastTrackingPhase = 'initializing';
   onTrackingRestarted = null;
   onTrackingLost = null;
   onTrackingRecovered = null;
@@ -248,9 +273,32 @@ let onSuspiciousImage: ((blobSize: number, frameIndex: number) => void) | null =
 let getScreenRotation: (() => number) | null = null;
 
 /**
- * Tracking state manager (created when AR session starts with tracking callbacks)
+ * Redux store injected by the host (`setTrackingStore`). When present
+ * together with `onTrackingRestarted`, the tracking-slice replaces the
+ * former `TrackingStateManager` class: `onXRFrame` dispatches
+ * `poseReceived`/`poseLost`, the XR reference-space reset listener
+ * dispatches `originReset`, and a `subscribeToSelector` translation
+ * surface translates phase transitions back into the existing
+ * `onTrackingLost` / `onTrackingRestarted` / `onTrackingRecovered`
+ * callbacks. When the store is absent the tracking pipeline simply
+ * no-ops, matching the prior behaviour where the manager was never
+ * constructed.
  */
-let trackingStateManager: TrackingStateManager | null = null;
+let trackingStore: TrackingSubscribableStore | null = null;
+
+/**
+ * Unsubscribe handle returned by the phase subscription set up in
+ * `initAR`. Cleared in `resetWebXRState` and on session-end so we never
+ * leave dangling listeners on a stale store.
+ */
+let trackingPhaseUnsubscribe: (() => void) | null = null;
+
+/**
+ * Mirror of the previously dispatched phase. Used solely to drive the
+ * INITIALIZING|LOST → TRACKING translation in the subscriber callback
+ * (Case 1 vs. Case 2 dispatch order is documented in the port plan).
+ */
+let lastTrackingPhase: TrackingPhase = 'initializing';
 
 /**
  * Callback for when tracking restarts (set via setTrackingCallbacks)
@@ -636,46 +684,33 @@ export async function initAR(
   // Handle session end
   xrSession.addEventListener('end', () => {
     log.info('Session ended');
-    // Clean up tracking state manager
-    if (trackingStateManager) {
-      trackingStateManager.reset();
+    // Reset the tracking slice so the next session starts from a clean
+    // INITIALIZING state. Mirrors the prior manager.reset() call.
+    if (trackingStore) {
+      trackingStore.dispatch(resetTrackingAction());
     }
+    lastTrackingPhase = 'initializing';
     xrSession = null;
     latestArPose = null;
   });
 
   await renderer.xr.setSession(xrSession);
 
-  // Initialize tracking state manager if callback is set
-  if (onTrackingRestarted) {
-    const trackingCallbacks: TrackingStateCallbacks = {
-      onTrackingLost: () => {
-        log.warn('Tracking lost');
-        // Drop GPS events during tracking loss by nulling the pose.
-        // The recording coordinator's null guard will skip GPS events.
-        latestArPose = null;
-        // Field Test Readiness Issue #3: Call external callback for UI update
-        onTrackingLost?.();
-      },
-      onTrackingRestarted: (payload) => {
-        log.info('Tracking restarted (origin reset)');
-        onTrackingRestarted?.(payload);
-      },
-      onTrackingRecovered: () => {
-        log.info('Tracking recovered (same coordinate frame)');
-        onTrackingRecovered?.();
-      },
-      getDeviceOrientation: () => {
-        const orientation = getLastDeviceOrientation();
-        return {
-          alpha: orientation?.alpha ?? 0,
-          beta: orientation?.beta ?? 0,
-          gamma: orientation?.gamma ?? 0,
-          absolute: orientation?.absolute ?? false,
-        };
-      },
-    };
-    trackingStateManager = new TrackingStateManager(trackingCallbacks);
+  // Initialize the tracking pipeline if (a) the host supplied an
+  // `onTrackingRestarted` callback (i.e. tracking is wanted at all) and
+  // (b) a store was injected via `setTrackingStore`. Without both we keep
+  // the legacy no-op behaviour: `onXRFrame` never dispatches and no
+  // callbacks ever fire. See docs/2026-05-13-tracking-state-slice-port-plan.md.
+  if (onTrackingRestarted && trackingStore) {
+    const store = trackingStore;
+    // Start from a clean slate — the previous session may have left the
+    // slice in any phase. The subscribeToSelector call below skips the
+    // initial INITIALIZING value because reference equality holds until
+    // the first real transition.
+    store.dispatch(resetTrackingAction());
+    lastTrackingPhase = 'initializing';
+
+    trackingPhaseUnsubscribe = subscribeToTrackingPhase(store);
 
     // Listen for XRReferenceSpace reset events to distinguish Case 1 (seamless
     // recovery) from Case 2 (relocalization). The reset event fires when the
@@ -690,7 +725,7 @@ export async function initAR(
         const transformData = extractResetTransformData(
           event as unknown as Record<string, unknown>
         );
-        trackingStateManager?.markOriginReset(transformData);
+        store.dispatch(originResetAction(transformData));
         log.warn(
           'XR reference space reset detected',
           transformData ? '(transform available)' : '(no transform)'
@@ -717,17 +752,92 @@ export async function initAR(
 }
 
 /**
- * Update tracking state manager with current pose state.
+ * Snapshot the current `DeviceOrientation` (with documented fallback
+ * defaults) for inclusion in `poseReceived` payloads. Inlines the read
+ * that used to live behind `TrackingStateCallbacks.getDeviceOrientation`.
+ */
+function snapshotDeviceOrientation(): {
+  alpha: number;
+  beta: number;
+  gamma: number;
+  absolute: boolean;
+} {
+  const orientation = getLastDeviceOrientation();
+  return {
+    alpha: orientation?.alpha ?? 0,
+    beta: orientation?.beta ?? 0,
+    gamma: orientation?.gamma ?? 0,
+    absolute: orientation?.absolute ?? false,
+  };
+}
+
+/**
+ * Wire the tracking-slice → host-callbacks translation. The subscriber
+ * runs synchronously inside each `dispatch`, so callback ordering matches
+ * the legacy `TrackingStateManager` (which invoked callbacks directly).
+ *
+ * Translation rules (locked in by tracking-slice tests):
+ *   - `tracking → lost`: clear `latestArPose` (drops in-flight GPS events)
+ *     and call `onTrackingLost?.()`.
+ *   - `lost → tracking` with `lastRestartedPayload !== null` (Case 2):
+ *     call `onTrackingRestarted?.(payload)` then dispatch
+ *     `clearLastRestartedPayload` so a subsequent loss cycle starts clean.
+ *   - `lost → tracking` with payload null (Case 1: seamless recovery):
+ *     call `onTrackingRecovered?.()`.
+ *   - `initializing → tracking`: no callback (initial acquisition is not
+ *     a restart — same behaviour as the manager).
+ */
+function subscribeToTrackingPhase(
+  store: TrackingSubscribableStore
+): () => void {
+  return store.subscribe(() => {
+    const next = selectTrackingPhase(store.getState());
+    const prev = lastTrackingPhase;
+    if (next === prev) return;
+    lastTrackingPhase = next;
+
+    if (prev === 'tracking' && next === 'lost') {
+      log.warn('Tracking lost');
+      // Drop GPS events during tracking loss by nulling the pose.
+      // The recording coordinator's null guard will skip GPS events.
+      latestArPose = null;
+      onTrackingLost?.();
+      return;
+    }
+
+    if (prev === 'lost' && next === 'tracking') {
+      const payload = selectLastRestartedPayload(store.getState());
+      if (payload !== null) {
+        log.info('Tracking restarted (origin reset)');
+        onTrackingRestarted?.(payload);
+        store.dispatch(clearLastRestartedPayloadAction());
+      } else {
+        log.info('Tracking recovered (same coordinate frame)');
+        onTrackingRecovered?.();
+      }
+    }
+  });
+}
+
+/**
+ * Dispatch the per-frame `poseReceived` / `poseLost` action into the
+ * tracking slice. No-op when no store is bound or when tracking wiring
+ * was not requested (matches legacy `if (!trackingStateManager) return`).
  */
 function updateTrackingState(arPose: ARPose | null): void {
-  if (!trackingStateManager) {
+  if (!trackingStore || !onTrackingRestarted) {
     return;
   }
 
   if (arPose) {
-    trackingStateManager.onPoseReceived(arPose);
+    trackingStore.dispatch(
+      poseReceivedAction({
+        pose: arPose,
+        sensorOrientation: snapshotDeviceOrientation(),
+      })
+    );
   } else {
-    trackingStateManager.onPoseLost();
+    trackingStore.dispatch(poseLostAction());
   }
 }
 
@@ -1200,6 +1310,32 @@ export function stopImageCapture(): void {
  */
 export function getImageCaptureFrameCount(): number {
   return imageCaptureManager?.getFrameCount() ?? 0;
+}
+
+/**
+ * Inject the Redux store used by the tracking-state slice pipeline.
+ *
+ * MUST be called before `initAR()` whenever the host also wires tracking
+ * callbacks via `setTrackingCallbacks`. Without a store the tracking
+ * pipeline silently no-ops (matching the prior behaviour where
+ * `TrackingStateManager` was never constructed).
+ *
+ * @param store — any store satisfying {@link TrackingSubscribableStore}.
+ *   `null` clears the binding (useful for teardown in tests).
+ */
+export function setTrackingStore(
+  store: TrackingSubscribableStore | null
+): void {
+  // If we already have an active phase subscription to a different store,
+  // tear it down before swapping. The new subscription is established
+  // inside `initAR`, not here, because we also want it to survive
+  // `resetWebXRState`-then-`initAR` cycles cleanly.
+  if (trackingPhaseUnsubscribe) {
+    trackingPhaseUnsubscribe();
+    trackingPhaseUnsubscribe = null;
+  }
+  trackingStore = store;
+  lastTrackingPhase = 'initializing';
 }
 
 /**

@@ -66,6 +66,7 @@ import {
   setTrackingLostCallback,
   setTrackingCallbacks,
   setTrackingRecoveredCallback,
+  setTrackingStore,
   getScene,
   getCamera,
   getArWorldGroup,
@@ -812,6 +813,7 @@ async function handleEnterAR(): Promise<void> {
     // When tracking resumes after an origin reset (Case 2), the store's
     // odometryTrackingRestarted reducer clears stale data and accumulates
     // offsets so alignment continues correctly across resets.
+    setTrackingStore(store);
     setTrackingCallbacks((payload) => {
       store.dispatch(odometryTrackingRestarted(payload));
       updateArInfo('');
