@@ -751,8 +751,7 @@ export async function initAR(
 
 /**
  * Snapshot the current `DeviceOrientation` (with documented fallback
- * defaults) for inclusion in `poseReceived` payloads. Inlines the read
- * that used to live behind `TrackingStateCallbacks.getDeviceOrientation`.
+ * defaults) for inclusion in `poseReceived` payloads.
  */
 function snapshotDeviceOrientation(): {
   alpha: number;

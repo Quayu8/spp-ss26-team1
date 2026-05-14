@@ -520,7 +520,7 @@ setTrackingRecoveredCallback(() => {
 });
 ```
 
-The `TrackingStateManager` (created during `initAR()`) detects tracking loss via null poses and listens for `XRReferenceSpace` `reset` events to distinguish:
+The `tracking` Redux slice (driven by `webxr-session.ts` during `initAR()`) detects tracking loss via null poses and listens for `XRReferenceSpace` `reset` events to distinguish:
 
 - **Case 1 (seamless recovery):** No origin change → keep all data, clear UI warning
 - **Case 2 (relocalization):** Origin reset → dispatch `odometryTrackingRestarted` to accumulate offsets and clear stale trajectory data
