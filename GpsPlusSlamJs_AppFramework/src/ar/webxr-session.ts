@@ -203,7 +203,6 @@ export function resetWebXRState(): void {
     trackingPhaseUnsubscribe = null;
   }
   trackingStore = null;
-  lastTrackingPhase = 'initializing';
   onTrackingRestarted = null;
   onTrackingLost = null;
   onTrackingRecovered = null;
@@ -291,12 +290,6 @@ let trackingStore: TrackingSubscribableStore | null = null;
  */
 let trackingPhaseUnsubscribe: (() => void) | null = null;
 
-/**
- * Mirror of the previously dispatched phase. Used solely to drive the
- * INITIALIZING|LOST → TRACKING translation in the subscriber callback
- * (Case 1 vs. Case 2 dispatch order is documented in the port plan).
- */
-let lastTrackingPhase: TrackingPhase = 'initializing';
 
 /**
  * Callback for when tracking restarts (set via setTrackingCallbacks)
@@ -687,7 +680,6 @@ export async function initAR(
     if (trackingStore) {
       trackingStore.dispatch(resetTrackingAction());
     }
-    lastTrackingPhase = 'initializing';
     xrSession = null;
     latestArPose = null;
   });
@@ -702,11 +694,10 @@ export async function initAR(
   if (onTrackingRestarted && trackingStore) {
     const store = trackingStore;
     // Start from a clean slate — the previous session may have left the
-    // slice in any phase. The subscribeToSelector call below skips the
-    // initial INITIALIZING value because reference equality holds until
-    // the first real transition.
+    // slice in any phase. The subscription created below starts with its
+    // own closure-local `prev = 'initializing'`, so this dispatch makes
+    // the slice match.
     store.dispatch(resetTrackingAction());
-    lastTrackingPhase = 'initializing';
 
     trackingPhaseUnsubscribe = subscribeToTrackingPhase(store);
 
@@ -787,13 +778,18 @@ function snapshotDeviceOrientation(): {
 function subscribeToTrackingPhase(
   store: TrackingSubscribableStore
 ): () => void {
+  // `prev` is closure-local so the mirror state is naturally scoped to a
+  // single subscription. Disposing the subscription (or replacing the
+  // store via `setTrackingStore`) discards this closure, so the next
+  // subscription always starts fresh at 'initializing'.
+  let prev: TrackingPhase = 'initializing';
   return store.subscribe(() => {
     const next = selectTrackingPhase(store.getState());
-    const prev = lastTrackingPhase;
     if (next === prev) return;
-    lastTrackingPhase = next;
+    const previous = prev;
+    prev = next;
 
-    if (prev === 'tracking' && next === 'lost') {
+    if (previous === 'tracking' && next === 'lost') {
       log.warn('Tracking lost');
       // Drop GPS events during tracking loss by nulling the pose.
       // The recording coordinator's null guard will skip GPS events.
@@ -802,7 +798,7 @@ function subscribeToTrackingPhase(
       return;
     }
 
-    if (prev === 'lost' && next === 'tracking') {
+    if (previous === 'lost' && next === 'tracking') {
       const payload = selectLastRestartedPayload(store.getState());
       if (payload !== null) {
         log.info('Tracking restarted (origin reset)');
@@ -1331,7 +1327,6 @@ export function setTrackingStore(
     trackingPhaseUnsubscribe = null;
   }
   trackingStore = store;
-  lastTrackingPhase = 'initializing';
 }
 
 /**
