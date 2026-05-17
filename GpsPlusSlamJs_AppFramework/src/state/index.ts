@@ -153,3 +153,32 @@ export {
   selectZeroReference,
   selectReferencePoints,
 } from './app-selectors.js';
+
+// --- tracking-quality (Phase A of
+//     docs/2026-05-16-tracking-quality-metrics-plan.md) ---
+export {
+  trackingQualityReducer,
+  createTrackingQualityListenerMiddleware,
+  computeTrackingQualityReport,
+  computeConvergence,
+  computeResidualConsensus,
+  computeCompassAgreement,
+  computeGpsAccuracy,
+  computeCoverage,
+  computeGpsVsFusedDivergence,
+  matrixDelta,
+  snapshotPushed,
+  snapshotsTrimmed,
+  reportUpdated,
+  resetTrackingQuality,
+  firstAgreementReached,
+  selectTrackingQuality,
+  selectRecentAlignments,
+  selectFirstAgreementObservationIndex,
+  DEFAULT_TRACKING_QUALITY_OPTIONS,
+  type TrackingQualityState,
+  type TrackingQualityReport,
+  type TrackingQualityOptions,
+  type TrackingQualitySliceState,
+  type AlignmentSnapshot,
+} from './tracking-quality.js';

@@ -35,6 +35,12 @@ import type { StorageBackend } from '../storage/storage-backend';
 import type { SessionMetadata as OpfsSessionMetadata } from '../storage/opfs-storage';
 import { recordingReducer, type RecordingState } from './recording-slice';
 import { trackingReducer, type TrackingSliceState } from './tracking-slice';
+import {
+  trackingQualityReducer,
+  createTrackingQualityListenerMiddleware,
+  type TrackingQualitySliceState,
+  type TrackingQualityOptions,
+} from './tracking-quality';
 import { createPersistenceMiddleware } from './persistence-middleware';
 
 /**
@@ -46,6 +52,7 @@ import { createPersistenceMiddleware } from './persistence-middleware';
 export interface SlamAppRootState extends LibraryRootState {
   recording: RecordingState;
   tracking: TrackingSliceState;
+  trackingQuality: TrackingQualitySliceState;
 }
 
 /** A bare-minimum middleware signature compatible with RTK's middleware list. */
@@ -96,6 +103,14 @@ export interface SlamAppStoreOptions<
    * @see EULA.md §3 — License Key
    */
   licenseKey?: string;
+
+  /**
+   * Optional overrides for the tracking-quality reporter
+   * (matrix-history size, residual window, thresholds, etc.).
+   *
+   * @see docs/2026-05-16-tracking-quality-metrics-plan.md
+   */
+  trackingQualityOptions?: Partial<TrackingQualityOptions>;
 }
 
 /**
@@ -144,6 +159,7 @@ export function createSlamAppStore<
     onWriteFailure,
     enableDevChecks = true,
     licenseKey = COMMUNITY_LICENSE_KEY,
+    trackingQualityOptions,
   } = options;
 
   validateLicenseKey(licenseKey);
@@ -154,8 +170,13 @@ export function createSlamAppStore<
     arElements: arElementsReducer,
     recording: recordingReducer,
     tracking: trackingReducer,
+    trackingQuality: trackingQualityReducer,
     ...(extraReducers ?? ({} as ExtraReducers)),
   };
+
+  const trackingQualityMiddleware = createTrackingQualityListenerMiddleware(
+    trackingQualityOptions
+  );
 
   const store = configureStore({
     reducer,
@@ -163,10 +184,12 @@ export function createSlamAppStore<
       getDefaultMiddleware({
         serializableCheck: enableDevChecks,
         immutableCheck: enableDevChecks,
-      }).concat(
-        createPersistenceMiddleware({ storageBackend, onWriteFailure }),
-        ...(extraMiddleware ?? [])
-      ),
+      })
+        .prepend(trackingQualityMiddleware)
+        .concat(
+          createPersistenceMiddleware({ storageBackend, onWriteFailure }),
+          ...(extraMiddleware ?? [])
+        ),
     devTools: {
       actionSanitizer: sanitizeForDevTools,
       stateSanitizer: sanitizeForDevTools,

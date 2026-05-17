@@ -91,6 +91,32 @@ export {
   type SubscribableStore,
   type StoreSubscriberDeps,
   wireStoreSubscribers,
+  // tracking-quality (Phase A — see
+  // docs/2026-05-16-tracking-quality-metrics-plan.md).
+  trackingQualityReducer,
+  createTrackingQualityListenerMiddleware,
+  computeTrackingQualityReport,
+  computeConvergence,
+  computeResidualConsensus,
+  computeCompassAgreement,
+  computeGpsAccuracy,
+  computeCoverage,
+  computeGpsVsFusedDivergence,
+  matrixDelta,
+  snapshotPushed,
+  snapshotsTrimmed,
+  reportUpdated,
+  resetTrackingQuality,
+  firstAgreementReached,
+  selectTrackingQuality,
+  selectRecentAlignments,
+  selectFirstAgreementObservationIndex,
+  DEFAULT_TRACKING_QUALITY_OPTIONS,
+  type TrackingQualityState,
+  type TrackingQualityReport,
+  type TrackingQualityOptions,
+  type TrackingQualitySliceState,
+  type AlignmentSnapshot,
 } from './state/index.js';
 
 // Storage: omit names that conflict with state (SessionMetadata)
