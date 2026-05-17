@@ -35,7 +35,7 @@
 
 import type { Action, PayloadAction, Middleware } from '@reduxjs/toolkit';
 import { createSlice, createListenerMiddleware } from '@reduxjs/toolkit';
-import { mat4, vec3 } from 'gl-matrix';
+import { mat4, quat, vec3 } from 'gl-matrix';
 import type {
   GpsPoint,
   LatLong,
@@ -287,14 +287,20 @@ export function computeConvergence(
 }
 
 /**
- * Rotation and translation delta between two row-major 4×4 matrices.
- * Rotation delta is the angle of the relative rotation (degrees);
- * translation delta is the Euclidean distance between origins (m).
+ * Rotation and translation delta between two 4×4 alignment matrices in
+ * the column-major layout that gl-matrix and the framework use.
  *
- * Mirrors `computeStabilityDelta` in
- * `GpsPlusSlamJs_Investigation/src/investigation-helpers.ts` so that the
- * library-side reporter and the Investigation harness agree on the
- * underlying numeric definition.
+ * Rotation: extract the orientation quaternion with `mat4.getRotation`
+ * and compute the relative angle via `quat.getAngle` (degrees).
+ * Translation: extract the origin column with `mat4.getTranslation` and
+ * compute the Euclidean distance.
+ *
+ * This is the **single shared kernel** for the AppFramework reporter and
+ * the Investigation harness (see §11 (a) of the tracking-quality plan).
+ * `GpsPlusSlamJs_Investigation/src/investigation-helpers.ts` re-exports
+ * `computeStabilityDelta` as a thin wrapper around this function so the
+ * §6.1 corpus sweep and the runtime convergence score share one numeric
+ * definition.
  */
 export function matrixDelta(
   prev: readonly number[],
@@ -303,32 +309,33 @@ export function matrixDelta(
   if (prev.length !== 16 || curr.length !== 16) {
     return { rotationDeltaDeg: 0, translationDeltaM: 0 };
   }
-  // Extract rotation 3×3 (gl-matrix stores column-major; treat both inputs
-  // the same — only the relative comparison matters, and applying the same
-  // layout to both cancels any convention mismatch in the rotation kernel).
-  const r0 = [prev[0], prev[1], prev[2], prev[4], prev[5], prev[6], prev[8], prev[9], prev[10]];
-  const r1 = [curr[0], curr[1], curr[2], curr[4], curr[5], curr[6], curr[8], curr[9], curr[10]];
-  // Relative rotation R = R1 * R0^T → trace gives the rotation angle.
-  // R0 columns: (r0[0],r0[1],r0[2]) (r0[3],r0[4],r0[5]) (r0[6],r0[7],r0[8])
-  // R1 columns: similar. R0^T rows == R0 columns. We just need trace(R1 * R0^T).
-  let trace = 0;
-  for (let i = 0; i < 3; i++) {
-    for (let k = 0; k < 3; k++) {
-      // (R1 * R0^T)[i,i] = sum_k R1[i,k] * R0[i,k]  (because R0^T[k,i] = R0[i,k])
-      trace += r1[i * 3 + k] * r0[i * 3 + k];
-    }
-  }
-  // Numeric safety: clamp acos input to [-1, 1].
-  const cosTheta = Math.min(1, Math.max(-1, (trace - 1) / 2));
-  const rotationDeltaDeg = (Math.acos(cosTheta) * 180) / Math.PI;
-  // Translation column = matrix[12..14] (column-major) or matrix[3,7,11] (row-major).
-  // Either way the same elements compared between prev/curr cancel any
-  // layout mismatch — the translation column is always in the same slot
-  // for both inputs because both came from the same producer.
-  const dx = curr[12] - prev[12];
-  const dy = curr[13] - prev[13];
-  const dz = curr[14] - prev[14];
-  const translationDeltaM = Math.hypot(dx, dy, dz);
+  const prevMat = mat4.fromValues(
+    prev[0], prev[1], prev[2], prev[3],
+    prev[4], prev[5], prev[6], prev[7],
+    prev[8], prev[9], prev[10], prev[11],
+    prev[12], prev[13], prev[14], prev[15],
+  );
+  const currMat = mat4.fromValues(
+    curr[0], curr[1], curr[2], curr[3],
+    curr[4], curr[5], curr[6], curr[7],
+    curr[8], curr[9], curr[10], curr[11],
+    curr[12], curr[13], curr[14], curr[15],
+  );
+  const prevQuat = quat.create();
+  const currQuat = quat.create();
+  mat4.getRotation(prevQuat, prevMat);
+  mat4.getRotation(currQuat, currMat);
+  quat.normalize(prevQuat, prevQuat);
+  quat.normalize(currQuat, currQuat);
+  // quat.getAngle can return NaN when the quaternions are nearly identical
+  // (dot product slightly > 1.0 due to float precision → acos(>1) = NaN).
+  const angleRad = quat.getAngle(prevQuat, currQuat);
+  const rotationDeltaDeg = Number.isNaN(angleRad) ? 0 : (angleRad * 180) / Math.PI;
+  const prevT = vec3.create();
+  const currT = vec3.create();
+  mat4.getTranslation(prevT, prevMat);
+  mat4.getTranslation(currT, currMat);
+  const translationDeltaM = vec3.distance(prevT, currT);
   return { rotationDeltaDeg, translationDeltaM };
 }
 

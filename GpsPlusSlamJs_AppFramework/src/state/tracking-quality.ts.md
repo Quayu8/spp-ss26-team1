@@ -81,6 +81,13 @@ receive — copies are taken before sorting or sliding-window operations.
 ## Defensive measures
 
 - `matrixDelta` validates length-16 matrices and returns zero deltas otherwise.
+  Internally uses `mat4.getRotation` + `quat.getAngle` + `mat4.getTranslation`
+  from gl-matrix — the same kernel as `computeStabilityDelta` in
+  `GpsPlusSlamJs_Investigation/src/investigation-helpers.ts`. Per the plan
+  §11 (a), these two functions share one numeric definition so the §6.1
+  corpus sweep's correlations are computed against the same kernel the
+  AppFramework reports at runtime. Numerical agreement is locked in by the
+  "matches the gl-matrix quat-based reference kernel" tests.
 - `computeResidualConsensus` returns score 0 (and `null` median) when alignment
   matrix or zero reference is missing.
 - `computeGpsAccuracy` skips entries with non-finite `latLongAccuracy`.

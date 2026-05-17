@@ -128,6 +128,74 @@ describe('matrixDelta', () => {
       translationDeltaM: 0,
     });
   });
+
+  // Why this test matters: §11 (a) of the tracking-quality plan requires
+  // matrixDelta to agree numerically with the gl-matrix-quat reference
+  // kernel used by GpsPlusSlamJs_Investigation/src/investigation-helpers.ts
+  // (`computeStabilityDelta`). The §6.1 corpus sweep correlates the
+  // AppFramework's runtime convergence score with the Investigation's
+  // hindsight error — both must use the same numeric definition or the
+  // correlation is meaningless. The reference kernel below mirrors
+  // computeStabilityDelta exactly; this test asserts identical output on
+  // a tricky compound-rotation+translation case.
+  it('matches the gl-matrix quat-based reference kernel on compound transforms', async () => {
+    const { mat4, quat, vec3 } = await import('gl-matrix');
+    const RAD_TO_DEG = 180 / Math.PI;
+
+    function referenceDelta(
+      prev: Matrix4,
+      curr: Matrix4
+    ): { rotationDeltaDeg: number; translationDeltaM: number } {
+      const prevMat = mat4.fromValues(...(prev as unknown as Parameters<typeof mat4.fromValues>));
+      const currMat = mat4.fromValues(...(curr as unknown as Parameters<typeof mat4.fromValues>));
+      const prevQuat = quat.create();
+      const currQuat = quat.create();
+      mat4.getRotation(prevQuat, prevMat);
+      mat4.getRotation(currQuat, currMat);
+      quat.normalize(prevQuat, prevQuat);
+      quat.normalize(currQuat, currQuat);
+      const angleRad = quat.getAngle(prevQuat, currQuat);
+      const rotationDeltaDeg = Number.isNaN(angleRad) ? 0 : angleRad * RAD_TO_DEG;
+      const prevT = vec3.create();
+      const currT = vec3.create();
+      mat4.getTranslation(prevT, prevMat);
+      mat4.getTranslation(currT, currMat);
+      return { rotationDeltaDeg, translationDeltaM: vec3.distance(prevT, currT) };
+    }
+
+    // Compose: rotate 17° about Y then 11° about X, then translate (1.2, -0.4, 2.7).
+    // Build column-major directly via gl-matrix to avoid hand-error.
+    const m = mat4.create();
+    mat4.fromTranslation(m, [1.2, -0.4, 2.7]);
+    mat4.rotateY(m, m, (17 * Math.PI) / 180);
+    mat4.rotateX(m, m, (11 * Math.PI) / 180);
+    const a: Matrix4 = Array.from(m) as Matrix4;
+    // A second matrix: rotate -23° about Y + translate (0.7, 0.2, -1.1).
+    const n = mat4.create();
+    mat4.fromTranslation(n, [0.7, 0.2, -1.1]);
+    mat4.rotateY(n, n, (-23 * Math.PI) / 180);
+    const b: Matrix4 = Array.from(n) as Matrix4;
+
+    const got = matrixDelta(a, b);
+    const ref = referenceDelta(a, b);
+    expect(got.rotationDeltaDeg).toBeCloseTo(ref.rotationDeltaDeg, 6);
+    expect(got.translationDeltaM).toBeCloseTo(ref.translationDeltaM, 9);
+  });
+
+  it('matches the gl-matrix reference for an identity → 90°-Y transform', async () => {
+    const { mat4, quat } = await import('gl-matrix');
+    const target = mat4.create();
+    mat4.rotateY(target, target, Math.PI / 2);
+    const got = matrixDelta(IDENTITY, Array.from(target) as Matrix4);
+
+    const idQ = quat.create();
+    const tQ = quat.create();
+    mat4.getRotation(tQ, target);
+    quat.normalize(tQ, tQ);
+    const refAngle = (quat.getAngle(idQ, tQ) * 180) / Math.PI;
+    expect(got.rotationDeltaDeg).toBeCloseTo(refAngle, 6);
+    expect(got.rotationDeltaDeg).toBeCloseTo(90, 5);
+  });
 });
 
 // ---------------------------------------------------------------------------
