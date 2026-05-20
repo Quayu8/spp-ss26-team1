@@ -15,10 +15,6 @@
  */
 
 import {
-  loadActionsFromZip,
-  loadSessionMetadata,
-} from 'gps-plus-slam-app-framework/storage/zip-reader';
-import {
   createRecorderStore,
   type RecorderStore,
 } from '../state/recorder-store';
@@ -44,7 +40,7 @@ import {
   nueQuaternionToWebXR,
 } from 'gps-plus-slam-app-framework/ar/webxr-session';
 import { createLogger } from 'gps-plus-slam-app-framework/utils/logger';
-import { migrateActionsIfNeeded } from '../storage/recording-migration.js';
+import { loadRecording } from '../storage/recording-loader.js';
 import * as THREE from 'three';
 
 const log = createLogger('ReplayMode');
@@ -118,17 +114,14 @@ export async function startReplayMode(
 ): Promise<ReplayModeController> {
   log.info('Starting replay mode...');
 
-  // R8: Load actions from zip
-  const [zipEntries, sessionMetadata] = await Promise.all([
-    loadActionsFromZip(zipData),
-    loadSessionMetadata(zipData),
-  ]);
-  const rawActions: ReplayAction[] = zipEntries.map((e) => e.action);
-  // Migrate old recordings (pre-NUE convention) to the current coordinate frame
-  const actions = migrateActionsIfNeeded(
-    rawActions,
-    sessionMetadata
-  ) as ReplayAction[];
+  // R8: Load + migrate the recording through the canonical version-transparent
+  // loader. `loadRecording` parses session metadata, migrates actions to the
+  // current schema, and exposes a memoised final state — replay only needs
+  // the migrated action list, which it forwards to the ReplayEngine.
+  const recording = await loadRecording(zipData);
+  const actions: ReplayAction[] = recording.actions.map(
+    (e) => e.action as ReplayAction
+  );
   log.info(`Loaded ${actions.length} actions from zip`);
 
   // Create store with NullStorageBackend (no persistence side effects)

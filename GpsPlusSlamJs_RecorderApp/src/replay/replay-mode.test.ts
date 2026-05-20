@@ -41,6 +41,10 @@ vi.mock('gps-plus-slam-app-framework/storage/zip-reader', () => ({
   loadSessionMetadata: vi.fn().mockResolvedValue({ odomCoordVersion: 5 }), // era 5 — no migration needed
 }));
 
+vi.mock('../storage/recording-loader', () => ({
+  loadRecording: vi.fn(),
+}));
+
 vi.mock('gps-plus-slam-app-framework/state/store-subscribers', () => ({
   wireStoreSubscribers: vi.fn(() => vi.fn()), // returns unsubscribe fn
 }));
@@ -73,7 +77,7 @@ vi.mock('gps-plus-slam-app-framework/ar/webxr-session', () => ({
 }));
 
 import { startReplayMode } from './replay-mode.js';
-import { loadActionsFromZip } from 'gps-plus-slam-app-framework/storage/zip-reader';
+import { loadRecording } from '../storage/recording-loader';
 import { wireStoreSubscribers } from 'gps-plus-slam-app-framework/state/store-subscribers';
 import { createRecorderStore } from '../state/recorder-store';
 import {
@@ -140,8 +144,20 @@ describe('replay-mode', () => {
   beforeEach(() => {
     vi.useFakeTimers();
     vi.clearAllMocks();
-    // Default: loadActionsFromZip returns our fixture
-    vi.mocked(loadActionsFromZip).mockResolvedValue(makeMockZipActions());
+    // Default: loadRecording returns our fixture wrapped in the LoadedRecording shape.
+    const fixtureEntries = makeMockZipActions();
+    vi.mocked(loadRecording).mockResolvedValue({
+      meta: null,
+      actions: fixtureEntries,
+      refPoints: [],
+      capabilities: {
+        hasSidecarRefPoints: false,
+        hasFusedObservations: false,
+        hasSessionMeta: false,
+        migrationApplied: false,
+      },
+      getFinalState: vi.fn(),
+    });
   });
 
   afterEach(() => {
@@ -155,8 +171,8 @@ describe('replay-mode', () => {
     const config = makeConfig();
     await startReplayMode(fakeZipData, config);
 
-    // loadActionsFromZip called with the zip data
-    expect(loadActionsFromZip).toHaveBeenCalledWith(fakeZipData);
+    // loadRecording called with the zip data
+    expect(loadRecording).toHaveBeenCalledWith(fakeZipData);
 
     // createRecorderStore called with NullStorageBackend
     expect(createRecorderStore).toHaveBeenCalledWith(
