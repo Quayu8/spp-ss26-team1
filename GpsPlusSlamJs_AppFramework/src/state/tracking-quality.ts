@@ -72,8 +72,17 @@ export interface TrackingQualityReport {
     coverage: number;
   };
   diagnostics: {
-    recentMaxRotationDeltaDeg: number;
-    recentMaxTranslationDeltaM: number;
+    /**
+     * §4.1 (Finding 6): **sum of |Δrotation|** across the last
+     * `matrixHistorySize - 1` consecutive snapshot pairs in the ring
+     * buffer, in degrees. Replaced the per-pair `recentMaxRotationDeltaDeg`
+     * on 2026-05-23 — see
+     * `GpsPlusSlamJs_Docs/docs/2026-05-23-tracking-quality-hud-user-feedback.md`
+     * (Finding 6). Surfaced in the recorder HUD as `ΣΔrot:`.
+     */
+    recentSumRotationDeltaDeg: number;
+    /** §4.1 (Finding 6): sum of |Δtranslation| across the same window, in metres. Surfaced as `ΣΔpos:`. */
+    recentSumTranslationDeltaM: number;
     medianResidualM: number;
     medianRecentGpsAccuracyM: number;
     walkedDistanceM: number;
@@ -260,8 +269,10 @@ function rampUp(value: number, low: number, high: number): number {
 
 export interface ConvergenceResult {
   score: number;
-  recentMaxRotationDeltaDeg: number;
-  recentMaxTranslationDeltaM: number;
+  /** §4.1 (Finding 6): sum of |Δrotation| across the last N-1 pairs. */
+  recentSumRotationDeltaDeg: number;
+  /** §4.1 (Finding 6): sum of |Δtranslation| across the last N-1 pairs. */
+  recentSumTranslationDeltaM: number;
   /** Pair count used (≥ 2 snapshots ⇒ ≥ 1 pair, else 0). */
   pairCount: number;
 }
@@ -273,44 +284,60 @@ export interface ConvergenceResult {
  * Investigation helpers (rotation + translation delta between two 4×4
  * matrices). With 0 or 1 snapshot we return score 0 — convergence is
  * undefined until at least one consecutive pair exists.
+ *
+ * Finding 6 (2026-05-23 field test): the per-pair `max` aggregation was
+ * replaced with a **sum** across the window. `max` is a burst detector
+ * — dominated by one bad pair, blind to slow drift; `sum` answers
+ * "how much alignment motion accumulated over the window?" and exposes
+ * slow creeping drift in user-readable units (°, m). The HUD now shows
+ * the raw sums (`ΣΔrot:`, `ΣΔpos:`) alongside the EMA-smoothed `Conv:`
+ * sub-score (Finding 4) so the user can debug an unstable reading.
  */
 export function computeConvergence(
   snapshots: readonly AlignmentSnapshot[],
   options: { rotationWarnDeg?: number; translationWarnM?: number } = {}
 ): ConvergenceResult {
-  const rotWarn = options.rotationWarnDeg ?? 3;
-  const transWarn = options.translationWarnM ?? 0.5;
+  // Defaults sized for sum across the default matrixHistorySize = 5 (so
+  // up to 4 pairs). Warn ≈ average 1.5°/pair or 0.25 m/pair — i.e. a
+  // sustained mild drift across the window starts the score ramp-down.
+  // Fail at 4× warn (consistent with the previous max-based scaling)
+  // gives a 24°/1 m cliff. These are conservative initial values; the
+  // §3 integration test work should empirically re-tune them — see
+  // 2026-05-23 doc, Finding 6 "cut-off constants re-tuned during the
+  // integration test".
+  const rotWarn = options.rotationWarnDeg ?? 6;
+  const transWarn = options.translationWarnM ?? 1;
   const rotFail = rotWarn * 4;
   const transFail = transWarn * 4;
 
   if (snapshots.length < 2) {
     return {
       score: 0,
-      recentMaxRotationDeltaDeg: 0,
-      recentMaxTranslationDeltaM: 0,
+      recentSumRotationDeltaDeg: 0,
+      recentSumTranslationDeltaM: 0,
       pairCount: 0,
     };
   }
 
-  let maxRotDeg = 0;
-  let maxTransM = 0;
+  let sumRotDeg = 0;
+  let sumTransM = 0;
   let pairCount = 0;
   for (let i = 1; i < snapshots.length; i++) {
     const { rotationDeltaDeg, translationDeltaM } = matrixDelta(
       snapshots[i - 1]!.matrix,
       snapshots[i]!.matrix
     );
-    if (rotationDeltaDeg > maxRotDeg) maxRotDeg = rotationDeltaDeg;
-    if (translationDeltaM > maxTransM) maxTransM = translationDeltaM;
+    sumRotDeg += Math.abs(rotationDeltaDeg);
+    sumTransM += Math.abs(translationDeltaM);
     pairCount += 1;
   }
 
-  const rotScore = rampDown(maxRotDeg, rotWarn, rotFail);
-  const transScore = rampDown(maxTransM, transWarn, transFail);
+  const rotScore = rampDown(sumRotDeg, rotWarn, rotFail);
+  const transScore = rampDown(sumTransM, transWarn, transFail);
   return {
     score: Math.min(rotScore, transScore),
-    recentMaxRotationDeltaDeg: maxRotDeg,
-    recentMaxTranslationDeltaM: maxTransM,
+    recentSumRotationDeltaDeg: sumRotDeg,
+    recentSumTranslationDeltaM: sumTransM,
     pairCount,
   };
 }
@@ -915,8 +942,8 @@ export function computeTrackingQualityReport(
     confidence: state === 'ar-lost' ? 0 : confidence,
     subScores,
     diagnostics: {
-      recentMaxRotationDeltaDeg: convergence.recentMaxRotationDeltaDeg,
-      recentMaxTranslationDeltaM: convergence.recentMaxTranslationDeltaM,
+      recentSumRotationDeltaDeg: convergence.recentSumRotationDeltaDeg,
+      recentSumTranslationDeltaM: convergence.recentSumTranslationDeltaM,
       medianResidualM: residual.medianResidualM,
       medianRecentGpsAccuracyM: gpsAccuracy.medianM,
       walkedDistanceM: coverage.walkedDistanceM,
@@ -964,8 +991,8 @@ function reportsEqual(
   const da = a.diagnostics;
   const db = b.diagnostics;
   return (
-    da.recentMaxRotationDeltaDeg === db.recentMaxRotationDeltaDeg &&
-    da.recentMaxTranslationDeltaM === db.recentMaxTranslationDeltaM &&
+    da.recentSumRotationDeltaDeg === db.recentSumRotationDeltaDeg &&
+    da.recentSumTranslationDeltaM === db.recentSumTranslationDeltaM &&
     da.medianResidualM === db.medianResidualM &&
     da.medianRecentGpsAccuracyM === db.medianRecentGpsAccuracyM &&
     da.walkedDistanceM === db.walkedDistanceM &&

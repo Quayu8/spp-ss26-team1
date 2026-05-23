@@ -402,8 +402,18 @@ export function updateTrackingQuality(report: TrackingQualityReport): void {
   // compass is unobservable on the iPhone hardware in use, and Obs/Walked
   // are diagnostic noise the user cannot act on. The fields remain on the
   // report so background metrics and tests can still consume them.
-  const { subScores } = report;
+  // ΣΔrot / ΣΔpos (Finding 6) sit next to Conv so the user can debug an
+  // unstable convergence reading by reading the raw accumulated motion.
+  const { subScores, diagnostics } = report;
   setDetail('tq-convergence', `Conv: ${pct(subScores.convergence)}`);
+  setDetail(
+    'tq-sum-rot',
+    `ΣΔrot: ${diagnostics.recentSumRotationDeltaDeg.toFixed(2)}°`
+  );
+  setDetail(
+    'tq-sum-pos',
+    `ΣΔpos: ${diagnostics.recentSumTranslationDeltaM.toFixed(2)}m`
+  );
   setDetail('tq-residual', `Resid: ${pct(subScores.residualConsensus)}`);
   setDetail('tq-gps-accuracy', `GPS Acc: ${pct(subScores.gpsAccuracy)}`);
   setDetail('tq-coverage', `Coverage: ${pct(subScores.coverage)}`);

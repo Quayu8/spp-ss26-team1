@@ -12,6 +12,11 @@ Five sub-scores, each in `[0, 1]`, gate a single overall `confidence` value
 (`min(...)`):
 
 - **convergence** (§4.1) — how stable consecutive alignment matrices are.
+  Aggregated by **sum** (not max) across the last `matrixHistorySize - 1`
+  pairs in the ring buffer (Finding 6, 2026-05-23). The raw sums are
+  exposed on `diagnostics.recentSumRotationDeltaDeg` /
+  `recentSumTranslationDeltaM` and surfaced in the recorder HUD as
+  `ΣΔrot:` / `ΣΔpos:`.
 - **residualConsensus** (§4.2) — agreement between odometry-projected pose and
   GPS fixes, normalised by `latLongAccuracy`.
 - **compassAgreement** (§4.3) — bearing the alignment claims vs. the absolute

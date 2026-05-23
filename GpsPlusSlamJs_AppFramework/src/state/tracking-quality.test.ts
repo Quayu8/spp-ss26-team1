@@ -245,7 +245,7 @@ describe('computeConvergence', () => {
     ];
     const r = computeConvergence(snaps);
     expect(r.score).toBeGreaterThan(0.9);
-    expect(r.recentMaxTranslationDeltaM).toBeGreaterThan(0);
+    expect(r.recentSumTranslationDeltaM).toBeGreaterThan(0);
     expect(r.pairCount).toBe(2);
   });
 
@@ -789,8 +789,8 @@ describe('trackingQuality slice', () => {
         coverage: 0.85,
       },
       diagnostics: {
-        recentMaxRotationDeltaDeg: 0,
-        recentMaxTranslationDeltaM: 0,
+        recentSumRotationDeltaDeg: 0,
+        recentSumTranslationDeltaM: 0,
         medianResidualM: 0.5,
         medianRecentGpsAccuracyM: 2,
         walkedDistanceM: 30,

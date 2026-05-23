@@ -58,6 +58,8 @@ function setupMinimalDOM(): void {
       <div id="tracking-quality-badge"><span id="tq-state"></span> <span id="tq-confidence"></span></div>
       <div id="tracking-quality-details" class="hidden">
         <div id="tq-convergence"></div>
+        <div id="tq-sum-rot"></div>
+        <div id="tq-sum-pos"></div>
         <div id="tq-residual"></div>
         <div id="tq-gps-accuracy"></div>
         <div id="tq-coverage"></div>
@@ -2405,8 +2407,8 @@ function makeReport(
       coverage: 1.0,
     },
     diagnostics: {
-      recentMaxRotationDeltaDeg: 1.2,
-      recentMaxTranslationDeltaM: 0.5,
+      recentSumRotationDeltaDeg: 1.2,
+      recentSumTranslationDeltaM: 0.5,
       medianResidualM: 2.3,
       medianRecentGpsAccuracyM: 6.0,
       walkedDistanceM: 42,
@@ -2513,6 +2515,37 @@ describe('updateTrackingQuality', () => {
     expect(document.getElementById('tq-compass-drift')).toBeNull();
     expect(document.getElementById('tq-obs-count')).toBeNull();
     expect(document.getElementById('tq-walked')).toBeNull();
+  });
+
+  // Why: Finding 6 — the two raw alignment-motion sums sit next to
+  // `Conv:` in the HUD so the user can see *how much* and *on which
+  // axis* the alignment is moving when the smoothed convergence score
+  // looks suspicious. The values come straight from
+  // `diagnostics.recentSum…` (no rounding to %), with 2 decimal places
+  // and the °/m suffixes the user expects in the field.
+  it('renders ΣΔrot and ΣΔpos sums from diagnostics (Finding 6)', () => {
+    updateTrackingQuality(
+      makeReport({
+        diagnostics: {
+          recentSumRotationDeltaDeg: 3.456,
+          recentSumTranslationDeltaM: 0.789,
+          medianResidualM: 2.0,
+          medianRecentGpsAccuracyM: 5.0,
+          walkedDistanceM: 42,
+          directionSpreadDeg: 120,
+          headingDeltaDeg: null,
+          compassDriftDetected: false,
+          observationsSeen: 25,
+          gpsVsFusedMaxDivergenceM: 3.1,
+        },
+      })
+    );
+    expect(document.getElementById('tq-sum-rot')!.textContent).toContain(
+      'ΣΔrot: 3.46°'
+    );
+    expect(document.getElementById('tq-sum-pos')!.textContent).toContain(
+      'ΣΔpos: 0.79m'
+    );
   });
 });
 
