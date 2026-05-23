@@ -116,6 +116,13 @@ export interface TrackingQualityOptions {
   firstAgreementMinStreak?: number;
   /** §4.8 consecutive sub-threshold observations before ok → degraded. */
   degradedHoldoff?: number;
+  /**
+   * §4.8b (Finding 4) — EMA blend factor applied to `subScores.convergence`.
+   * `1.0` disables smoothing (raw value). `0 < α < 1` blends as
+   * `smoothed = prevSmoothed + α * (raw - prevSmoothed)`. First observation
+   * (no prior smoothed value) is seeded to the raw value.
+   */
+  convergenceEmaAlpha?: number;
 }
 
 export const DEFAULT_TRACKING_QUALITY_OPTIONS: Required<TrackingQualityOptions> =
@@ -134,6 +141,7 @@ export const DEFAULT_TRACKING_QUALITY_OPTIONS: Required<TrackingQualityOptions> 
     gpsAccuracyFloorM: 1,
     firstAgreementMinStreak: 3,
     degradedHoldoff: 3,
+    convergenceEmaAlpha: 0.3, // §4.8b — corpus-tunable, see Finding 4
   };
 
 // ---------------------------------------------------------------------------
@@ -156,6 +164,13 @@ export interface TrackingQualitySliceState {
   report: TrackingQualityReport | null;
   /** §4.8 — consecutive observations with raw confidence < degradedThreshold. */
   degradedConsecutiveCount: number;
+  /**
+   * §4.8b (Finding 4) — last EMA-smoothed convergence sub-score. `null`
+   * means "no prior observation" and the next aggregator run will seed
+   * the value with the raw convergence score. Reset on
+   * `resetTrackingQuality`.
+   */
+  smoothedConvergence: number | null;
 }
 
 const initialState: TrackingQualitySliceState = {
@@ -163,6 +178,7 @@ const initialState: TrackingQualitySliceState = {
   firstAgreementObservationIndex: null,
   report: null,
   degradedConsecutiveCount: 0,
+  smoothedConvergence: null,
 };
 
 // ===========================================================================
@@ -174,6 +190,19 @@ function clamp01(x: number): number {
   if (x < 0) return 0;
   if (x > 1) return 1;
   return x;
+}
+
+/**
+ * §4.8b (Finding 4) — exponential moving-average blend. When `prev` is
+ * `null` the filter has no history yet and we seed it to `raw`.
+ * `alpha = 1` disables smoothing (returns `raw`); `alpha = 0` freezes
+ * the filter at `prev`. Non-finite `alpha` is treated as 1 (no
+ * smoothing) to fail safe — never silently swallow a valid raw signal.
+ */
+function emaBlend(prev: number | null, raw: number, alpha: number): number {
+  if (prev === null) return raw;
+  const a = Number.isFinite(alpha) ? alpha : 1;
+  return prev + a * (raw - prev);
 }
 
 function wrapToHalfCircle(deg: number): number {
@@ -719,6 +748,14 @@ const trackingQualitySlice = createSlice({
     degradedCountUpdated(state, action: PayloadAction<number>) {
       state.degradedConsecutiveCount = action.payload;
     },
+    /**
+     * §4.8b (Finding 4) — persist the latest EMA-smoothed convergence so
+     * the next aggregator pass can blend against it. `null` resets the
+     * filter (next pass seeds from raw).
+     */
+    smoothedConvergenceUpdated(state, action: PayloadAction<number | null>) {
+      state.smoothedConvergence = action.payload;
+    },
     /** Full reset — used on new session start / tracking reset. */
     resetTrackingQuality() {
       return initialState;
@@ -732,6 +769,7 @@ export const {
   reportUpdated,
   firstAgreementReached,
   degradedCountUpdated,
+  smoothedConvergenceUpdated,
   resetTrackingQuality,
 } = trackingQualitySlice.actions;
 
@@ -832,7 +870,13 @@ export function computeTrackingQualityReport(
   );
 
   const subScores = {
-    convergence: clamp01(convergence.score),
+    convergence: clamp01(
+      emaBlend(
+        rootState.trackingQuality?.smoothedConvergence ?? null,
+        convergence.score,
+        opts.convergenceEmaAlpha
+      )
+    ),
     residualConsensus: clamp01(residual.score),
     compassAgreement: compass.score === null ? null : clamp01(compass.score),
     gpsAccuracy: clamp01(gpsAccuracy.score),
@@ -1106,6 +1150,14 @@ export function createTrackingQualityListenerMiddleware(
       }
       if (dcc !== (tqNext?.degradedConsecutiveCount ?? 0)) {
         api.dispatch(degradedCountUpdated(dcc));
+      }
+
+      // §4.8b (Finding 4): persist the smoothed convergence so the next
+      // aggregator pass can blend against it. The report already carries
+      // the new value via `subScores.convergence`.
+      const newSmoothed = report.subScores.convergence;
+      if (newSmoothed !== (tqNext?.smoothedConvergence ?? null)) {
+        api.dispatch(smoothedConvergenceUpdated(newSmoothed));
       }
 
       if (!reportsEqual(prev, report)) {

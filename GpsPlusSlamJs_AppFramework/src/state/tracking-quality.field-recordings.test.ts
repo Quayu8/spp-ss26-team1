@@ -282,21 +282,22 @@ describe.runIf(fixturesAvailable)(
         expect(final.subScores.residualConsensus).toBeGreaterThan(0.8);
       });
 
-      it('convergence sub-score is unstable across the indoor session', () => {
-        // Why: confirms Finding 4 (part 2). With un-smoothed convergence,
-        // a stationary user still sees jumps because the alignment matrix
-        // can briefly coincide across two snapshots (small deltas) before
-        // diverging again. Once EMA smoothing lands (Finding 4 fix), this
-        // range should drop and the assertion below will be flipped to a
-        // tighter bound.
+      it('convergence sub-score is stable across the indoor session (EMA smoothing, Finding 4)', () => {
+        // Why: confirms Finding 4 fix. Before EMA smoothing the
+        // convergence sub-score jumped because the alignment matrix can
+        // briefly coincide across two snapshots (tiny deltas) before
+        // diverging again, flashing the HUD. EMA blending (α=0.3,
+        // §4.8b) damps these single-frame spikes; the visible range over
+        // the indoor recording must now stay below 0.2. If this fails
+        // because the range crept back up, look for a regression in the
+        // smoothing wiring (slice field, listener dispatch, or the
+        // emaBlend call in computeTrackingQualityReport).
         const values = indoorResult.snapshots.map(
           (s) => s.report.subScores.convergence
         );
         values.push(indoorResult.finalReport!.subScores.convergence);
         const range = Math.max(...values) - Math.min(...values);
-        // Pre-fix expectation: visible jitter. Post-fix target (after EMA):
-        // tighten to < 0.2 once Finding 4 lands.
-        expect(range).toBeGreaterThan(0.1);
+        expect(range).toBeLessThan(0.2);
       });
     });
   }

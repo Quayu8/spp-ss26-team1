@@ -42,7 +42,8 @@ state machine collapses the score to `'warming-up' | 'ar-lost' | 'degraded' |
   - `trackingQualityReducer`.
   - `snapshotPushed(AlignmentSnapshot)`, `snapshotsTrimmed({size})`,
     `reportUpdated(report | null)`, `firstAgreementReached(observationIndex)`,
-    `degradedCountUpdated(count)`, `resetTrackingQuality()`.
+    `degradedCountUpdated(count)`,
+    `smoothedConvergenceUpdated(value | null)`, `resetTrackingQuality()`.
 - **Selectors**
   - `selectTrackingQuality(state)`, `selectRecentAlignments(state)`,
     `selectFirstAgreementObservationIndex(state)`.
@@ -83,6 +84,16 @@ receive — copies are taken before sorting or sliding-window operations.
 - §4.8 hysteresis: the `ok → degraded` transition is held off for
   `degradedHoldoff` (default 3) consecutive sub-threshold observations.
   `degraded → ok` is immediate. `ar-lost` bypasses holdoff entirely.
+- §4.8b EMA-smoothed convergence (Finding 4): the convergence sub-score
+  reported by `computeTrackingQualityReport` is blended with the previously
+  persisted `smoothedConvergence` using `α = convergenceEmaAlpha`
+  (default `0.3`). On the first observation (`smoothedConvergence === null`)
+  the filter is seeded with the raw value. The listener middleware
+  dispatches `smoothedConvergenceUpdated` after every aggregator pass so
+  the next pass can blend against the latest value. `α = 1.0` disables
+  smoothing; `α → 0` makes the score effectively constant. The smoothed
+  value is the one surfaced on the report (and to the HUD); the raw value
+  is no longer exposed.
 - All sub-scores are clamped to `[0, 1]`; never `NaN` for empty input.
 
 ## Defensive measures

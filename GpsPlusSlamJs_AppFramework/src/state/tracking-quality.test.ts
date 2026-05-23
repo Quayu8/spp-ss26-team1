@@ -473,6 +473,7 @@ function buildRootState(input: {
   sensorOrientation?: DeviceOrientation;
   lastValidPose?: ARPose;
   firstAgreementObservationIndex?: number | null;
+  smoothedConvergence?: number | null;
 }): MinimalRoot {
   return {
     gpsData: {
@@ -500,6 +501,7 @@ function buildRootState(input: {
         input.firstAgreementObservationIndex ?? null,
       report: null,
       degradedConsecutiveCount: 0,
+      smoothedConvergence: input.smoothedConvergence ?? null,
     },
   };
 }
@@ -635,6 +637,109 @@ describe('computeTrackingQualityReport', () => {
     expect(report.subScores.compassAgreement).toBe(0);
     expect(report.confidence).toBe(0);
     expect(report.state).toBe('degraded');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// §4.8b — EMA-smoothed convergence sub-score (Finding 4)
+// ---------------------------------------------------------------------------
+
+describe('EMA-smoothed convergence (Finding 4)', () => {
+  // Why these tests matter: §4.8b adds exponential smoothing on top of
+  // computeConvergence so single-frame matrix coincidences do not flash the
+  // HUD between high and low confidence. The smoothed value is what feeds
+  // subScores.convergence; computeConvergence itself stays raw because the
+  // §6.1 investigation harness wants the un-smoothed signal.
+
+  // Build a snapshot pair whose deltas drive convergence to a specific raw
+  // score. We use a tiny rotation (small angle around Y) to make the math
+  // analytic — convergence.rampDown(angleDeg, warn=3, fail=12).
+  function snapshotsForRotationDeg(angleDeg: number): AlignmentSnapshot[] {
+    const rad = (angleDeg * Math.PI) / 180;
+    const c = Math.cos(rad);
+    const s = Math.sin(rad);
+    // Row-major 4x4 with a Y-axis rotation in the upper-left 3x3.
+    const rotated = [c, 0, s, 0, 0, 1, 0, 0, -s, 0, c, 0, 0, 0, 0, 1];
+    return [
+      { observationIndex: 0, matrix: [...IDENTITY] },
+      { observationIndex: 1, matrix: rotated },
+    ];
+  }
+
+  it('first observation seeds the smoothed value to the raw value', () => {
+    const root = buildRootState({
+      alignmentMatrix: IDENTITY,
+      gpsPositions: [gps(0, 0, 0, 2)],
+      odometryPositions: [[0, 0, 0]],
+      zeroRef: ZERO_REF,
+      snapshots: snapshotsForRotationDeg(0), // raw = 1.0
+    });
+    const report = computeTrackingQualityReport(root as never);
+    expect(report.subScores.convergence).toBeCloseTo(1, 5);
+  });
+
+  it('blends prior smoothed value with the new raw value via alpha', () => {
+    // Prior smoothed = 0.0, alpha = 0.3, raw convergence = 1.0 →
+    // smoothed = 0.0 + 0.3 * (1.0 - 0.0) = 0.3.
+    const root = buildRootState({
+      alignmentMatrix: IDENTITY,
+      gpsPositions: [gps(0, 0, 0, 2)],
+      odometryPositions: [[0, 0, 0]],
+      zeroRef: ZERO_REF,
+      snapshots: snapshotsForRotationDeg(0), // raw convergence = 1.0
+      smoothedConvergence: 0,
+    });
+    const report = computeTrackingQualityReport(root as never);
+    expect(report.subScores.convergence).toBeCloseTo(0.3, 5);
+  });
+
+  it('respects custom alpha option', () => {
+    // alpha = 1.0 disables smoothing → smoothed === raw.
+    const root = buildRootState({
+      alignmentMatrix: IDENTITY,
+      gpsPositions: [gps(0, 0, 0, 2)],
+      odometryPositions: [[0, 0, 0]],
+      zeroRef: ZERO_REF,
+      snapshots: snapshotsForRotationDeg(0),
+      smoothedConvergence: 0,
+    });
+    const report = computeTrackingQualityReport(root as never, {
+      convergenceEmaAlpha: 1,
+    });
+    expect(report.subScores.convergence).toBeCloseTo(1, 5);
+  });
+
+  it('alternating raw values produce a smoother subScores.convergence series', () => {
+    // Drive the aggregator across an oscillating raw-convergence sequence
+    // by varying the snapshot pair each step. Compare the range of raw
+    // vs. smoothed values; smoothed range must be strictly tighter.
+    const alpha = 0.3;
+    let prevSmoothed: number | null = null;
+    const rawSeries: number[] = [];
+    const smoothedSeries: number[] = [];
+    // Pattern: 0°/9° flip → raw alternates between 1.0 and 0.0.
+    const pattern = [0, 9, 0, 9, 0, 9, 0, 9, 0, 9];
+    for (const angle of pattern) {
+      const root = buildRootState({
+        alignmentMatrix: IDENTITY,
+        gpsPositions: [gps(0, 0, 0, 2)],
+        odometryPositions: [[0, 0, 0]],
+        zeroRef: ZERO_REF,
+        snapshots: snapshotsForRotationDeg(angle),
+        smoothedConvergence: prevSmoothed,
+      });
+      const report = computeTrackingQualityReport(root as never, {
+        convergenceEmaAlpha: alpha,
+      });
+      smoothedSeries.push(report.subScores.convergence);
+      // raw is exposed via diagnostics in F6, but for now read it from a
+      // fresh computeConvergence call so we don't depend on F6.
+      const raw = computeConvergence(snapshotsForRotationDeg(angle)).score;
+      rawSeries.push(raw);
+      prevSmoothed = report.subScores.convergence;
+    }
+    const range = (xs: number[]) => Math.max(...xs) - Math.min(...xs);
+    expect(range(smoothedSeries)).toBeLessThan(range(rawSeries));
   });
 });
 
