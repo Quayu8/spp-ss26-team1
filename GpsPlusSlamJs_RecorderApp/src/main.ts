@@ -137,6 +137,9 @@ import {
   type AlignmentLerper,
 } from 'gps-plus-slam-app-framework/visualization/alignment-lerper';
 import { createGpsCompassCubes } from 'gps-plus-slam-app-framework/visualization/gps-compass-cubes';
+import { FrameTileVisualizer } from './visualization/frame-tile-visualizer';
+import { decodeFrameTexture } from './visualization/frame-texture-decoder';
+import { wireFrameTileSubscribers } from './visualization/wire-frame-tile-subscribers';
 
 import {
   initReplayUI,
@@ -205,6 +208,16 @@ let cameraFollower: CameraFollower | null = null;
 
 // Issue 4: Alignment lerper — smooths alignment-matrix transitions
 let alignmentLerper: AlignmentLerper | null = null;
+
+// F3.5d — live frame-tile visualization. The recorder caches every captured
+// frame blob in memory keyed by its `frames/<filename>` path, so the
+// FrameTileVisualizer can paint the same textures the replay path uses.
+// The wirer subscribes to `framesInScene` (updated by F3.2's add2dImage
+// listener), and FrameTileVisualizer.addTile reads the blob out of this
+// cache. Cleared on `resetMainState`.
+const liveFrameBlobs = new Map<string, Blob>();
+let frameTileVisualizer: FrameTileVisualizer | null = null;
+let unsubscribeFrameTiles: (() => void) | null = null;
 
 // Replay mode handlers — encapsulates all replay state and event handlers
 // (Finding #7 decomposition: extracted from main.ts to replay/replay-handlers.ts)
@@ -329,6 +342,17 @@ export function resetMainState(): void {
     alignmentLerper.dispose();
     alignmentLerper = null;
   }
+  // F3.5d — tear down frame-tile visualizer + drop cached frame blobs so
+  // GPU textures and JPEG bytes don't outlive the AR session.
+  if (unsubscribeFrameTiles) {
+    unsubscribeFrameTiles();
+    unsubscribeFrameTiles = null;
+  }
+  if (frameTileVisualizer) {
+    frameTileVisualizer.dispose();
+    frameTileVisualizer = null;
+  }
+  liveFrameBlobs.clear();
   recordingSessionHandlers.reset();
   refPointHandlers.reset();
   destroyConfirmDialog();
@@ -890,6 +914,29 @@ async function handleEnterAR(): Promise<void> {
 
       cameraFollower = createCameraFollower(arScene);
       createGpsCompassCubes(cameraFollower.object3D);
+
+      // F3.5d — wire the frame-tile visualizer into the live AR scene so
+      // captured frames appear as textured planes during recording, using
+      // the same listener+visualizer stack as replay. Best-effort: failures
+      // must not break the AR session.
+      try {
+        frameTileVisualizer = new FrameTileVisualizer(arScene);
+        unsubscribeFrameTiles = wireFrameTileSubscribers({
+          storeRef,
+          visualizer: frameTileVisualizer,
+          blobSource: (imageFile) =>
+            Promise.resolve(liveFrameBlobs.get(imageFile) ?? null),
+          decodeTexture: decodeFrameTexture,
+          onError: (err, imageFile) => {
+            log.warn(`Frame tile decode failed for ${imageFile}`, err);
+          },
+        });
+      } catch (err) {
+        log.warn(
+          'Frame tile visualizer wiring skipped; recording continues without frame tiles',
+          err
+        );
+      }
     }
 
     // Issue #14: Map overlay is created lazily on first toggle (not here)
@@ -989,6 +1036,11 @@ function handleImageCaptured(image: CapturedImage): void {
   updateFrameCount(image.frameIndex);
 
   const filename = `frame-${String(image.frameIndex).padStart(6, '0')}.jpg`;
+
+  // F3.5d — cache the blob BEFORE dispatch so the frame-tile listener
+  // (F3.2) and visualizer (F3.5d wire-up) can resolve it synchronously
+  // when they react to the add2dImage action.
+  liveFrameBlobs.set(`frames/${filename}`, image.blob);
 
   // Dispatch first to preserve chronological action order (see DESIGN NOTE above)
   // Raw WebXR position — the reducer applies WebXR→NUE conversion
