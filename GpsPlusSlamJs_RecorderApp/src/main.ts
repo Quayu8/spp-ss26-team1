@@ -124,7 +124,8 @@ import {
 
 import type { LatLong } from 'gps-plus-slam-app-framework/core';
 import { odometryTrackingRestarted } from 'gps-plus-slam-app-framework/core';
-import { selectTrackingQuality } from 'gps-plus-slam-app-framework';
+import { createStoreRef } from './state/store-ref';
+import { subscribeHudToTrackingQuality } from './ui/hud-tracking-quality-subscriber';
 import { gpsEventVisualizer } from 'gps-plus-slam-app-framework/visualization/gps-event-markers';
 import { LeafletMapOverlay } from 'gps-plus-slam-app-framework/visualization/leaflet-map-overlay';
 import {
@@ -183,8 +184,15 @@ function createNewStore() {
   });
 }
 
-// Global store instance with write failure callback
+// Global store instance with write failure callback.
+//
+// `storeRef` mirrors the same value but emits to subscribers on every swap.
+// Long-lived subscribers (e.g. the HUD tracking-quality subscriber, F1 fix
+// from 2026-05-26-tracking-quality-regression-and-replay-gaps-user-feedback.md)
+// must observe `storeRef` instead of capturing `store` in a closure, or they
+// silently freeze against the boot store after `Start Recording` / replay.
 let store = createNewStore();
+const storeRef = createStoreRef(store);
 
 // Current recording options (loaded at startup)
 let recordingOptions: RecordingOptions;
@@ -203,6 +211,7 @@ let alignmentLerper: AlignmentLerper | null = null;
 const replayHandlers = createReplayHandlers({
   setStore: (newStore) => {
     store = newStore;
+    storeRef.set(newStore);
   },
 });
 
@@ -212,6 +221,7 @@ const recordingSessionHandlers = createRecordingSessionHandlers({
   getStore: () => store,
   setStore: (newStore) => {
     store = newStore;
+    storeRef.set(newStore);
   },
   setTrackingStore,
   createNewStore,
@@ -442,6 +452,7 @@ export async function resetForNewRecording(): Promise<void> {
 
   // Fresh store for next session
   store = createNewStore();
+  storeRef.set(store);
 
   // --- Reset storage (preserve OPFS root, clear session handles) ---
   resetForNewSession();
@@ -907,14 +918,13 @@ async function handleEnterAR(): Promise<void> {
     // Issue #2 fix: Update status to match AR_READY state per Application State Machine
     updateStatus('AR active - Tap Start to record');
 
-    // Subscribe to tracking quality changes so the HUD reflects alignment health.
-    let lastReport = selectTrackingQuality(store.getState());
-    store.subscribe(() => {
-      const report = selectTrackingQuality(store.getState());
-      if (report && report !== lastReport) {
-        lastReport = report;
-        updateTrackingQuality(report);
-      }
+    // Subscribe to tracking quality changes so the HUD reflects alignment
+    // health. Goes through `storeRef` so the subscription follows every
+    // store swap (Start Recording / replay) — see F1 in
+    // `docs/2026-05-26-tracking-quality-regression-and-replay-gaps-user-feedback.md`.
+    subscribeHudToTrackingQuality({
+      storeRef,
+      updateHud: updateTrackingQuality,
     });
 
     // Issue 7 Phase 2: Push AR screen state for back-button navigation
