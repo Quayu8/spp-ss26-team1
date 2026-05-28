@@ -29,14 +29,12 @@ import {
 import { showError, updateStatus } from '../ui/hud';
 import { showToast } from '../ui/toast';
 import {
-  markReferencePoint,
   setImportedRefPoints as setImportedRefPointsAction,
   incrementRefPointUsage,
   clearSessionRefPointUsage as clearSessionRefPointUsageAction,
   resetRefPointsState,
   type GpsPoint,
   type RawGpsPoint,
-  type MarkReferencePointPayload,
 } from '../state/recorder-store';
 import {
   addRefPointEntry,
@@ -160,11 +158,11 @@ export function createRefPointHandlers(
   function dispatchRefPointAction(
     refPointId: string,
     refPointName: string,
-    odomPosition: Vector3,
-    odomRotation: Quaternion,
+    _odomPosition: Vector3,
+    _odomRotation: Quaternion,
     gpsPoint: GpsPoint,
     timestamp: number,
-    alignmentMatrix: Matrix4 | null | undefined,
+    _alignmentMatrix: Matrix4 | null | undefined,
     fusedGpsPoint:
       | { latitude: number; longitude: number; altitude?: number }
       | undefined
@@ -179,29 +177,13 @@ export function createRefPointHandlers(
       deviceRotation: _d,
       ...rawGpsPoint
     } = gpsPoint;
-    // Pass the live alignment matrix on the payload when one is available so
-    // the library reducer can derive the fused-at-mark-time `gpsPoint`
-    // snapshot itself (step 2 of the 2026-05-27 slice-collapse plan).
-    // Omit the field entirely when no matrix is known so the reducer falls
-    // back to the raw-projection path.
-    const payload: MarkReferencePointPayload = {
-      id: refPointId,
-      position: odomPosition,
-      rotation: odomRotation,
-      rawGpsPoint,
-      timestamp,
-    };
-    if (alignmentMatrix) {
-      payload.alignmentMatrix = alignmentMatrix;
-    }
-    deps.getStore().dispatch(markReferencePoint(payload));
 
-    // Parallel-coexist write into the new flat `refPointsV2` slice
-    // (Step 5.2 of the 2026-05-27 slice-collapse plan). Same id /
-    // timestamp / rawGpsPoint as the legacy action; carries the fused
-    // lat/lon (+altitude) snapshot in `RawGpsPoint` shape when an
-    // alignment matrix was in effect at mark-time, and the
-    // user/imported display name when known.
+    // Single source of truth: the flat `refPointsV2` slice. Step 5.7 of
+    // the 2026-05-27 slice-collapse plan dropped the parallel
+    // `gpsData/markReferencePoint` dispatch; the library no longer
+    // tracks ref points. Carries the fused lat/lon (+altitude) snapshot
+    // in `RawGpsPoint` shape when an alignment matrix was in effect at
+    // mark-time, and the user/imported display name when known.
     const fusedRaw: RawGpsPoint | undefined = fusedGpsPoint
       ? {
           ...rawGpsPoint,

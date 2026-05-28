@@ -40,7 +40,6 @@ const {
   mockUpdateStatus,
   mockShowToast,
   mockIsRefPointPickerVisible,
-  mockMarkReferencePoint,
   mockCalcGpsCoords,
   mockFusedGpsFromOdom,
 } = vi.hoisted(() => ({
@@ -73,10 +72,6 @@ const {
   mockUpdateStatus: vi.fn(),
   mockShowToast: vi.fn(),
   mockIsRefPointPickerVisible: vi.fn<() => boolean>().mockReturnValue(false),
-  mockMarkReferencePoint: vi.fn((payload: unknown) => ({
-    type: 'recording/markReferencePoint',
-    payload,
-  })),
   mockCalcGpsCoords: vi.fn().mockReturnValue({ lat: 49.123, lon: 8.456 }),
   mockFusedGpsFromOdom: vi.fn().mockReturnValue({ lat: 49.123, lon: 8.456 }),
 }));
@@ -101,7 +96,6 @@ vi.mock('../state/recorder-store', async () => {
   );
   return {
     ...actual,
-    markReferencePoint: mockMarkReferencePoint,
   };
 });
 
@@ -264,80 +258,113 @@ function populateKnownAnchor(
 }
 
 /**
- * Synthesize the RefPointMark that the production listener middleware
- * (`createRefPointMarkListenerMiddleware`, F2) would build for the most
- * recent `gpsData/markReferencePoint` action.
+ * Step 5.7 helpers: query the V2 dispatch stream for ref-point markings.
  *
- * Why: these tests run against a mock store that does not install the real
- * listener middleware. To keep the existing call-site contract assertions
- * meaningful, we reconstruct the mark deterministically from the action
- * payload plus the current store state — the same inputs the listener uses.
- * Production correctness of the listener itself is covered by
- * `src/state/ref-point-mark-listener.test.ts`.
+ * Production source-of-truth is the `refPointsV2/addRefPointEntry` action.
+ * These helpers replace the previous `mockMarkReferencePoint.mock.calls`
+ * lookups (the parallel `gpsData/markReferencePoint` dispatch was dropped
+ * in Step 5.7 of the 2026-05-27 slice-collapse plan).
  */
-function resolveSynthGpsPosition(
-  store: RecorderStore,
-  rawGpsPoint: { latitude: number; longitude: number; altitude?: number }
-): { lat: number; lon: number; altitude?: number } {
-  const state = store.getState() as unknown as {
-    gpsData?: {
-      zero?: unknown;
-      gpsEvents?: { alignmentMatrix?: number[] | null };
-    };
+interface V2EntryPayload {
+  id: string;
+  timestamp?: number;
+  name?: string;
+  rawGpsPoint: {
+    latitude: number;
+    longitude: number;
+    altitude?: number;
   };
-  const alignmentMatrix = state.gpsData?.gpsEvents?.alignmentMatrix;
-  const zeroRef = state.gpsData?.zero;
-  if (alignmentMatrix && zeroRef) {
-    const fused = mockFusedGpsFromOdom.mock.results.at(-1)?.value as
-      | { lat: number; lon: number; altitude?: number }
-      | undefined;
-    return {
-      lat: fused?.lat ?? rawGpsPoint.latitude,
-      lon: fused?.lon ?? rawGpsPoint.longitude,
-      altitude: fused?.altitude ?? rawGpsPoint.altitude,
-    };
-  }
-  return {
-    lat: rawGpsPoint.latitude,
-    lon: rawGpsPoint.longitude,
-    altitude: rawGpsPoint.altitude,
+  gpsPoint?: {
+    latitude: number;
+    longitude: number;
+    altitude?: number;
   };
 }
 
+function getMarkCalls(store: RecorderStore): V2EntryPayload[] {
+  const dispatchMock = store.dispatch as unknown as {
+    mock: { calls: Array<[unknown]> };
+  };
+  return dispatchMock.mock.calls
+    .map((c) => c[0] as { type?: string; payload?: unknown })
+    .filter((a) => a?.type === 'refPointsV2/addRefPointEntry')
+    .map((a) => a.payload as V2EntryPayload);
+}
+
+function getLastV2Payload(store: RecorderStore): V2EntryPayload | undefined {
+  return getMarkCalls(store).at(-1);
+}
+
+function expectMarkDispatchedTimes(store: RecorderStore, n: number): void {
+  expect(getMarkCalls(store).length).toBe(n);
+}
+
 function getDispatchedCurrentMark(store: RecorderStore): RefPointMark {
-  const calls = mockMarkReferencePoint.mock.calls as Array<
-    [
-      {
+  // Step 5.7: source-of-truth dispatch is the V2 `refPointsV2/addRefPointEntry`
+  // action. Synthesise the legacy `RefPointMark` shape for assertion convenience
+  // by combining the V2 payload (id / timestamp / rawGpsPoint / gpsPoint?) with
+  // the latest extractOdomPosition / extractOdomRotation mock returns (the same
+  // values the production handler computes from the AR pose right before the
+  // dispatch).
+  const dispatchMock = store.dispatch as unknown as {
+    mock: { calls: Array<[unknown]> };
+  };
+  const v2Calls = dispatchMock.mock.calls
+    .map((c) => c[0] as { type?: string; payload?: unknown })
+    .filter((a) => a?.type === 'refPointsV2/addRefPointEntry');
+  const payload = v2Calls.at(-1)?.payload as
+    | {
         id: string;
-        position: Vector3;
-        rotation: Quaternion;
-        rawGpsPoint: { latitude: number; longitude: number; altitude?: number };
         timestamp?: number;
-      },
-    ]
-  >;
-  const payload = calls[calls.length - 1]?.[0];
+        rawGpsPoint: {
+          latitude: number;
+          longitude: number;
+          altitude?: number;
+        };
+        gpsPoint?: {
+          latitude: number;
+          longitude: number;
+          altitude?: number;
+        };
+      }
+    | undefined;
   if (!payload) {
     throw new Error(
-      'Expected a gpsData/markReferencePoint action to have been dispatched'
+      'Expected a refPointsV2/addRefPointEntry action to have been dispatched'
     );
   }
+  const position = mockExtractOdomPosition.mock.results.at(-1)?.value as
+    | Vector3
+    | undefined;
+  const rotation = mockExtractOdomRotation.mock.results.at(-1)?.value as
+    | Quaternion
+    | undefined;
+  const fused = payload.gpsPoint ?? payload.rawGpsPoint;
   return {
     id: payload.id,
-    odomPosition: payload.position,
-    odomRotation: payload.rotation,
-    gpsPosition: resolveSynthGpsPosition(store, payload.rawGpsPoint),
+    odomPosition: position ?? ([0, 0, 0] as Vector3),
+    odomRotation: rotation ?? ([0, 0, 0, 1] as Quaternion),
+    gpsPosition: {
+      lat: fused.latitude,
+      lon: fused.longitude,
+      altitude: fused.altitude,
+    },
     timestamp: payload.timestamp ?? Date.now(),
   };
 }
 
 /**
- * Assert that at least one `gpsData/markReferencePoint` action was
- * dispatched (the production trigger that drives the listener's
- * `addCurrentRefPointMark` synthesis in F2).
+ * Assert that at least one `refPointsV2/addRefPointEntry` action was
+ * dispatched (Step 5.7: the V2 slice is the canonical mark log).
  */
-function expectCurrentRefPointDispatched(_store: RecorderStore): void {
-  expect(mockMarkReferencePoint).toHaveBeenCalled();
+function expectCurrentRefPointDispatched(store: RecorderStore): void {
+  const dispatchMock = store.dispatch as unknown as {
+    mock: { calls: Array<[unknown]> };
+  };
+  const v2Calls = dispatchMock.mock.calls
+    .map((c) => c[0] as { type?: string })
+    .filter((a) => a?.type === 'refPointsV2/addRefPointEntry');
+  expect(v2Calls.length).toBeGreaterThan(0);
 }
 
 function createMockGpsPoint(overrides?: Partial<GpsPoint>): GpsPoint {
@@ -550,6 +577,7 @@ describe('handleMarkRefPoint — validation', () => {
 
 describe('handleMarkRefPoint — picker integration', () => {
   let handlers: RefPointHandlers;
+  let store: RecorderStore;
   const mockArPose = createMockArPose();
   const mockGpsPoint = createMockGpsPoint();
 
@@ -563,7 +591,7 @@ describe('handleMarkRefPoint — picker integration', () => {
     mockShowRefPointPicker.mockResolvedValue(null);
     mockExtractOdomPosition.mockReturnValue([1, 2, 3] as Vector3);
     mockExtractOdomRotation.mockReturnValue([0, 0, 0, 1] as Quaternion);
-    const store = createMockStore([mockGpsPoint]);
+    store = createMockStore([mockGpsPoint]);
     handlers = createRefPointHandlers(
       createDefaultDeps({ getStore: () => store })
     );
@@ -646,9 +674,9 @@ describe('handleMarkRefPoint — picker integration', () => {
     // Picker should NOT be shown
     expect(mockShowRefPointPicker).not.toHaveBeenCalled();
     // But the ref point should still be dispatched with H3 ID
-    expect(mockMarkReferencePoint).toHaveBeenCalled();
-    const payload = mockMarkReferencePoint.mock.calls[0][0] as { id: string };
-    expect(payload.id).toMatch(/^[0-9a-f]{15}$/);
+    const payload = getLastV2Payload(store);
+    expect(payload).toBeDefined();
+    expect(payload!.id).toMatch(/^[0-9a-f]{15}$/);
   });
 
   // Why: Re-observation should use the imported ref point's display name (not H3 index)
@@ -906,12 +934,12 @@ describe('handleMarkRefPoint — full flow', () => {
     expectCurrentRefPointDispatched(mockStore);
   });
 
-  // Why (Step 2 of 2026-05-27 slice-collapse plan): the dispatched
-  // `markReferencePoint` action must carry the live alignment matrix so the
-  // library reducer can derive the fused-at-mark-time `gpsPoint` snapshot
-  // itself. When the recorder has no alignment yet, the payload omits the
-  // field (the reducer falls back to raw-projection in that case).
-  it('should pass alignmentMatrix on the dispatched markReferencePoint payload when present', async () => {
+  // Why (Step 5.7 of 2026-05-27 slice-collapse plan): the dispatched V2
+  // `addRefPointEntry` action must carry the fused-at-mark-time `gpsPoint`
+  // snapshot (`RawGpsPoint` shape) when the live alignment matrix is in
+  // effect. When the recorder has no alignment yet, the payload omits the
+  // field and downstream consumers fall back to `rawGpsPoint`.
+  it('should carry fused gpsPoint on V2 payload when alignmentMatrix is present', async () => {
     const matrix = new Array(16).fill(0) as number[];
     matrix[0] = matrix[5] = matrix[10] = matrix[15] = 1;
     const storeWithMatrix = createMockStore([createMockGpsPoint()], {
@@ -923,20 +951,18 @@ describe('handleMarkRefPoint — full flow', () => {
 
     await localHandlers.handleMarkRefPoint();
 
-    const payload = mockMarkReferencePoint.mock.calls.at(-1)?.[0] as {
-      alignmentMatrix?: number[];
-    };
-    expect(payload.alignmentMatrix).toEqual(matrix);
+    const payload = getLastV2Payload(storeWithMatrix);
+    expect(payload?.gpsPoint).toBeDefined();
+    expect(payload?.gpsPoint?.latitude).toBe(49.123);
+    expect(payload?.gpsPoint?.longitude).toBe(8.456);
   });
 
-  it('should omit alignmentMatrix when none is in state', async () => {
+  it('should omit gpsPoint on V2 payload when no alignmentMatrix is in state', async () => {
     // mockStore created in beforeEach has alignmentMatrix=null.
     await handlers.handleMarkRefPoint();
 
-    const payload = mockMarkReferencePoint.mock.calls.at(-1)?.[0] as {
-      alignmentMatrix?: number[];
-    };
-    expect(payload.alignmentMatrix).toBeUndefined();
+    const payload = getLastV2Payload(mockStore);
+    expect(payload?.gpsPoint).toBeUndefined();
   });
 });
 
@@ -1046,11 +1072,11 @@ describe('handleMarkRefPoint — re-observation cooldown', () => {
 
     // First re-observation should succeed
     await handlers.handleMarkRefPoint();
-    expect(mockMarkReferencePoint).toHaveBeenCalledTimes(1);
+    expectMarkDispatchedTimes(store, 1);
 
     // Second re-observation within cooldown should be silently ignored
     await handlers.handleMarkRefPoint();
-    expect(mockMarkReferencePoint).toHaveBeenCalledTimes(1); // Still 1
+    expectMarkDispatchedTimes(store, 1); // Still 1
   });
 
   it('should allow re-observation after cooldown expires', async () => {
@@ -1082,14 +1108,14 @@ describe('handleMarkRefPoint — re-observation cooldown', () => {
 
     // First mark
     await handlers.handleMarkRefPoint();
-    expect(mockMarkReferencePoint).toHaveBeenCalledTimes(1);
+    expectMarkDispatchedTimes(store, 1);
 
     // Advance past the cooldown (10 seconds)
     vi.advanceTimersByTime(11_000);
 
     // Second mark should now succeed
     await handlers.handleMarkRefPoint();
-    expect(mockMarkReferencePoint).toHaveBeenCalledTimes(2);
+    expectMarkDispatchedTimes(store, 2);
 
     vi.useRealTimers();
   });
@@ -1113,7 +1139,7 @@ describe('handleMarkRefPoint — re-observation cooldown', () => {
 
     // No imported ref points → new ref point flow (picker shown)
     await handlers.handleMarkRefPoint();
-    expect(mockMarkReferencePoint).toHaveBeenCalledTimes(1);
+    expectMarkDispatchedTimes(store, 1);
 
     // Second new ref point should still work immediately
     mockShowRefPointPicker.mockResolvedValue({
@@ -1121,7 +1147,7 @@ describe('handleMarkRefPoint — re-observation cooldown', () => {
       isNew: true,
     });
     await handlers.handleMarkRefPoint();
-    expect(mockMarkReferencePoint).toHaveBeenCalledTimes(2);
+    expectMarkDispatchedTimes(store, 2);
   });
 
   // Why: reset() must clear the per-H3-cell cooldown map so that cooldown
@@ -1156,11 +1182,11 @@ describe('handleMarkRefPoint — re-observation cooldown', () => {
 
     // First re-observation should succeed
     await handlers.handleMarkRefPoint();
-    expect(mockMarkReferencePoint).toHaveBeenCalledTimes(1);
+    expectMarkDispatchedTimes(store, 1);
 
     // Cooldown is now active — second call should be ignored
     await handlers.handleMarkRefPoint();
-    expect(mockMarkReferencePoint).toHaveBeenCalledTimes(1);
+    expectMarkDispatchedTimes(store, 1);
 
     // Reset should clear cooldown state
     handlers.reset();
@@ -1178,7 +1204,7 @@ describe('handleMarkRefPoint — re-observation cooldown', () => {
 
     // Re-observation should succeed immediately after reset (no cooldown)
     await handlers.handleMarkRefPoint();
-    expect(mockMarkReferencePoint).toHaveBeenCalledTimes(2);
+    expectMarkDispatchedTimes(store, 2);
   });
 });
 
@@ -1262,11 +1288,11 @@ describe('handleMarkRefPoint — H3-based ID', () => {
     await handlers.handleMarkRefPoint();
 
     // The dispatched action must use the H3 index, not "Bank"
-    expect(mockMarkReferencePoint).toHaveBeenCalled();
-    const payload = mockMarkReferencePoint.mock.calls[0][0] as { id: string };
+    const payload = getLastV2Payload(mockStore);
+    expect(payload).toBeDefined();
     // H3 res-11 indices are 15-char hex strings
-    expect(payload.id).toMatch(/^[0-9a-f]{15}$/);
-    expect(payload.id).not.toBe('Bank');
+    expect(payload!.id).toMatch(/^[0-9a-f]{15}$/);
+    expect(payload!.id).not.toBe('Bank');
   });
 
   it('should persist the ref point using H3 index as ID and picker name as display name', async () => {
@@ -1287,7 +1313,7 @@ describe('handleMarkRefPoint — H3-based ID', () => {
     mockShowRefPointPicker.mockResolvedValue({ id: 'Name1', isNew: true });
     await handlers.handleMarkRefPoint();
 
-    const id1 = (mockMarkReferencePoint.mock.calls[0][0] as { id: string }).id;
+    const id1 = getLastV2Payload(mockStore)!.id;
 
     // Reset and mark again at the same GPS position but with different user name
     vi.clearAllMocks();
@@ -1301,7 +1327,7 @@ describe('handleMarkRefPoint — H3-based ID', () => {
     mockShowRefPointPicker.mockResolvedValue({ id: 'Name2', isNew: true });
     await handlers.handleMarkRefPoint();
 
-    const id2 = (mockMarkReferencePoint.mock.calls[0][0] as { id: string }).id;
+    const id2 = getLastV2Payload(mockStore)!.id;
     expect(id1).toBe(id2);
   });
 
@@ -2002,19 +2028,20 @@ describe('handleMarkRefPoint — re-observation toast feedback', () => {
 });
 
 // ============================================================================
-// Step 5.2 (2026-05-27 slice-collapse plan): parallel write to refPointsV2
+// Step 5.2 + 5.7 (2026-05-27 slice-collapse plan): refPointsV2 dispatch
 // ============================================================================
 
 /**
- * Why these tests matter: `handleMarkRefPoint` must dispatch BOTH the
- * legacy `gpsData/markReferencePoint` action AND the new
- * `refPointsV2/addRefPointEntry` action with matching `id`/`timestamp`
- * /`rawGpsPoint` so that the new flat slice can take over as source of
- * truth in 5.3–5.7 without losing data. When an alignment matrix is in
- * effect at mark-time the entry's `gpsPoint` snapshot carries the
- * fused lat/lon; otherwise it is omitted (raw-projection fallback).
+ * Why these tests matter: `handleMarkRefPoint` must dispatch a
+ * `refPointsV2/addRefPointEntry` action carrying the H3-cell `id`,
+ * `timestamp`, `rawGpsPoint`, and the picker/imported `name`. When an
+ * alignment matrix is in effect at mark-time the entry's `gpsPoint`
+ * snapshot carries the fused lat/lon; otherwise it is omitted
+ * (consumers fall back to `rawGpsPoint`). Step 5.7 dropped the
+ * previously-parallel `gpsData/markReferencePoint` dispatch — the V2
+ * action is now the sole source of truth.
  */
-describe('handleMarkRefPoint — parallel refPointsV2 write (Step 5.2)', () => {
+describe('handleMarkRefPoint — refPointsV2 dispatch (Step 5.2 / 5.7)', () => {
   function findV2Dispatch(
     store: RecorderStore
   ): { type: string; payload: unknown } | undefined {
@@ -2026,7 +2053,7 @@ describe('handleMarkRefPoint — parallel refPointsV2 write (Step 5.2)', () => {
       .find((a) => a?.type === 'refPointsV2/addRefPointEntry');
   }
 
-  it('dispatches refPointsV2/addRefPointEntry alongside markReferencePoint', async () => {
+  it('dispatches refPointsV2/addRefPointEntry with id/timestamp/rawGpsPoint/name', async () => {
     vi.clearAllMocks();
     mockIsRefPointPickerVisible.mockReturnValue(false);
     mockGetCurrentArPose.mockReturnValue(createMockArPose());
@@ -2037,14 +2064,10 @@ describe('handleMarkRefPoint — parallel refPointsV2 write (Step 5.2)', () => {
       createDefaultDeps({ getStore: () => store })
     );
 
+    const before = Date.now();
     await handlers.handleMarkRefPoint();
 
-    expect(mockMarkReferencePoint).toHaveBeenCalledTimes(1);
-    const legacyPayload = mockMarkReferencePoint.mock.calls[0][0] as {
-      id: string;
-      timestamp: number;
-      rawGpsPoint: { latitude: number; longitude: number };
-    };
+    expectMarkDispatchedTimes(store, 1);
     const v2 = findV2Dispatch(store);
     expect(v2).toBeDefined();
     const v2Payload = v2!.payload as {
@@ -2052,17 +2075,11 @@ describe('handleMarkRefPoint — parallel refPointsV2 write (Step 5.2)', () => {
       timestamp: number;
       name?: string;
       rawGpsPoint: { latitude: number; longitude: number };
-      gpsPoint?: { latitude: number; longitude: number };
     };
-    expect(v2Payload.id).toBe(legacyPayload.id);
-    expect(v2Payload.timestamp).toBe(legacyPayload.timestamp);
-    expect(v2Payload.rawGpsPoint.latitude).toBe(
-      legacyPayload.rawGpsPoint.latitude
-    );
-    expect(v2Payload.rawGpsPoint.longitude).toBe(
-      legacyPayload.rawGpsPoint.longitude
-    );
-    // Display name (from picker for new ref points)
+    expect(v2Payload.id).toMatch(/^[0-9a-f]{15}$/);
+    expect(v2Payload.timestamp).toBeGreaterThanOrEqual(before);
+    expect(v2Payload.rawGpsPoint.latitude).toBe(49.0);
+    expect(v2Payload.rawGpsPoint.longitude).toBe(8.0);
     expect(v2Payload.name).toBe('bench');
   });
 
