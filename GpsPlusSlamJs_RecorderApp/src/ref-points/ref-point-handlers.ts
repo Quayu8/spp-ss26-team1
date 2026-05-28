@@ -36,8 +36,10 @@ import {
   resetRefPointsState,
   selectCachedKnownRefPoints,
   type GpsPoint,
+  type RawGpsPoint,
   type MarkReferencePointPayload,
 } from '../state/recorder-store';
+import { addRefPointEntry } from '../state/ref-points-v2-slice';
 import { fusedGpsFromOdom } from 'gps-plus-slam-app-framework/utils/fused-path';
 import { createLogger } from 'gps-plus-slam-app-framework/utils/logger';
 import {
@@ -155,11 +157,15 @@ export function createRefPointHandlers(
 
   function dispatchRefPointAction(
     refPointId: string,
+    refPointName: string,
     odomPosition: Vector3,
     odomRotation: Quaternion,
     gpsPoint: GpsPoint,
     timestamp: number,
-    alignmentMatrix: Matrix4 | null | undefined
+    alignmentMatrix: Matrix4 | null | undefined,
+    fusedGpsPoint:
+      | { latitude: number; longitude: number; altitude?: number }
+      | undefined
   ): void {
     // Extract raw sensor fields from state-side GpsPoint for the action payload.
     // Derived fields (coordinates, weight, zeroRef, deviceRotation) are
@@ -187,6 +193,30 @@ export function createRefPointHandlers(
       payload.alignmentMatrix = alignmentMatrix;
     }
     deps.getStore().dispatch(markReferencePoint(payload));
+
+    // Parallel-coexist write into the new flat `refPointsV2` slice
+    // (Step 5.2 of the 2026-05-27 slice-collapse plan). Same id /
+    // timestamp / rawGpsPoint as the legacy action; carries the fused
+    // lat/lon (+altitude) snapshot in `RawGpsPoint` shape when an
+    // alignment matrix was in effect at mark-time, and the
+    // user/imported display name when known.
+    const fusedRaw: RawGpsPoint | undefined = fusedGpsPoint
+      ? {
+          ...rawGpsPoint,
+          latitude: fusedGpsPoint.latitude,
+          longitude: fusedGpsPoint.longitude,
+          altitude: fusedGpsPoint.altitude ?? rawGpsPoint.altitude,
+        }
+      : undefined;
+    deps.getStore().dispatch(
+      addRefPointEntry({
+        id: refPointId,
+        timestamp,
+        name: refPointName,
+        rawGpsPoint,
+        ...(fusedRaw ? { gpsPoint: fusedRaw } : {}),
+      })
+    );
   }
 
   async function persistRefPointObservation(
@@ -347,11 +377,13 @@ export function createRefPointHandlers(
       // Dispatch action to library
       dispatchRefPointAction(
         refPointId,
+        refPointName,
         odomPosition,
         odomRotation,
         lastGpsPoint,
         timestamp,
-        alignmentMatrix
+        alignmentMatrix,
+        fusedGpsPoint
       );
 
       // Persist to disk

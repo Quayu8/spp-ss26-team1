@@ -19,7 +19,7 @@
 
 import type { PayloadAction } from '@reduxjs/toolkit';
 import { createSelector, createSlice } from '@reduxjs/toolkit';
-import type { GpsPoint, RawGpsPoint } from './recorder-store';
+import type { RawGpsPoint } from './recorder-store';
 import { type KnownGeoAnchor } from 'gps-plus-slam-app-framework/geo/h3-proximity';
 
 // ---------------------------------------------------------------------------
@@ -37,11 +37,15 @@ export interface RefPointEntry {
   rawGpsPoint: RawGpsPoint;
   /**
    * Fused GPS snapshot derived at mark-time from the alignment matrix in
-   * effect at that moment. Absent for imported entries and for legacy
-   * entries replayed from recordings made before fused-at-mark-time
-   * landed in Step 1 of the slice-collapse plan.
+   * effect at that moment — a `RawGpsPoint`-shape with `latitude`,
+   * `longitude`, and (optionally) `altitude` overridden by the fused
+   * value. The only downstream consumer (visualizer) reads exactly those
+   * three fields, so we store the slim raw shape rather than re-derive a
+   * full state-side `GpsPoint`. Absent for imported entries and for
+   * legacy entries replayed from recordings made before fused-at-mark-
+   * time landed in Step 1 of the slice-collapse plan.
    */
-  gpsPoint?: GpsPoint;
+  gpsPoint?: RawGpsPoint;
 }
 
 export interface RefPointsV2State {
@@ -60,19 +64,14 @@ const refPointsV2Slice = createSlice({
   name: 'refPointsV2',
   initialState,
   reducers: {
-    // `RefPointEntry` contains readonly tuple shapes (Vector3 in `GpsPoint`)
-    // that Immer's WritableNonArrayDraft refuses to widen. The slice only
-    // ever replaces or appends entries — never mutates them in-place — so a
-    // structural cast on `state.entries` is sound. Same pattern as the
-    // legacy `refPoints` slice (`setPriorRefPointMarks`).
     addRefPointEntry(state, action: PayloadAction<RefPointEntry>) {
-      (state as { entries: RefPointEntry[] }).entries.push(action.payload);
+      state.entries.push(action.payload);
     },
     setImportedRefPointEntries(
       state,
       action: PayloadAction<RefPointEntry[]>
     ) {
-      (state as { entries: RefPointEntry[] }).entries = action.payload;
+      state.entries = action.payload;
     },
     resetRefPoints() {
       return initialState;

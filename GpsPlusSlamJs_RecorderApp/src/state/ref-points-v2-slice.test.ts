@@ -15,7 +15,7 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import type { GpsPoint, RawGpsPoint } from './recorder-store';
+import type { RawGpsPoint } from './recorder-store';
 import {
   addRefPointEntry,
   refPointsV2Reducer,
@@ -36,11 +36,10 @@ const RAW: RawGpsPoint = {
   timestamp: 1_700_000_000_000,
 };
 
-const FUSED: GpsPoint = {
+const FUSED: RawGpsPoint = {
   ...RAW,
-  zeroRef: { latitude: 50.0, longitude: 6.0 },
-  coordinates: [0, 0, 0],
-  weight: 1,
+  latitude: 50.124,
+  longitude: 6.790,
 };
 
 const baseEntry: RefPointEntry = {

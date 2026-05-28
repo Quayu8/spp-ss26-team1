@@ -1849,3 +1849,152 @@ describe('handleMarkRefPoint — re-observation toast feedback', () => {
     expect(mockShowToast).not.toHaveBeenCalled();
   });
 });
+
+// ============================================================================
+// Step 5.2 (2026-05-27 slice-collapse plan): parallel write to refPointsV2
+// ============================================================================
+
+/**
+ * Why these tests matter: `handleMarkRefPoint` must dispatch BOTH the
+ * legacy `gpsData/markReferencePoint` action AND the new
+ * `refPointsV2/addRefPointEntry` action with matching `id`/`timestamp`
+ * /`rawGpsPoint` so that the new flat slice can take over as source of
+ * truth in 5.3–5.7 without losing data. When an alignment matrix is in
+ * effect at mark-time the entry's `gpsPoint` snapshot carries the
+ * fused lat/lon; otherwise it is omitted (raw-projection fallback).
+ */
+describe('handleMarkRefPoint — parallel refPointsV2 write (Step 5.2)', () => {
+  function findV2Dispatch(
+    store: RecorderStore
+  ): { type: string; payload: unknown } | undefined {
+    const dispatchMock = store.dispatch as unknown as {
+      mock: { calls: Array<[{ type: string; payload: unknown }]> };
+    };
+    return dispatchMock.mock.calls
+      .map((c) => c[0])
+      .find((a) => a?.type === 'refPointsV2/addRefPointEntry');
+  }
+
+  it('dispatches refPointsV2/addRefPointEntry alongside markReferencePoint', async () => {
+    vi.clearAllMocks();
+    mockIsRefPointPickerVisible.mockReturnValue(false);
+    mockGetCurrentArPose.mockReturnValue(createMockArPose());
+    mockGetCurrentScenarioHandle.mockReturnValue(createMockScenarioHandle());
+    mockShowRefPointPicker.mockResolvedValue({ id: 'bench', isNew: true });
+    const store = createMockStore([createMockGpsPoint()]);
+    const handlers = createRefPointHandlers(
+      createDefaultDeps({ getStore: () => store })
+    );
+
+    await handlers.handleMarkRefPoint();
+
+    expect(mockMarkReferencePoint).toHaveBeenCalledTimes(1);
+    const legacyPayload = mockMarkReferencePoint.mock.calls[0][0] as {
+      id: string;
+      timestamp: number;
+      rawGpsPoint: { latitude: number; longitude: number };
+    };
+    const v2 = findV2Dispatch(store);
+    expect(v2).toBeDefined();
+    const v2Payload = v2!.payload as {
+      id: string;
+      timestamp: number;
+      name?: string;
+      rawGpsPoint: { latitude: number; longitude: number };
+      gpsPoint?: { latitude: number; longitude: number };
+    };
+    expect(v2Payload.id).toBe(legacyPayload.id);
+    expect(v2Payload.timestamp).toBe(legacyPayload.timestamp);
+    expect(v2Payload.rawGpsPoint.latitude).toBe(
+      legacyPayload.rawGpsPoint.latitude
+    );
+    expect(v2Payload.rawGpsPoint.longitude).toBe(
+      legacyPayload.rawGpsPoint.longitude
+    );
+    // Display name (from picker for new ref points)
+    expect(v2Payload.name).toBe('bench');
+  });
+
+  it('carries the fused snapshot on gpsPoint when an alignment matrix is in effect', async () => {
+    vi.clearAllMocks();
+    mockIsRefPointPickerVisible.mockReturnValue(false);
+    mockGetCurrentArPose.mockReturnValue(createMockArPose());
+    mockGetCurrentScenarioHandle.mockReturnValue(createMockScenarioHandle());
+    mockShowRefPointPicker.mockResolvedValue({ id: 'bench', isNew: true });
+    mockFusedGpsFromOdom.mockReturnValueOnce({
+      lat: 49.5,
+      lon: 8.5,
+      altitude: 250,
+    });
+    const matrix = new Array(16).fill(0) as number[];
+    matrix[0] = matrix[5] = matrix[10] = matrix[15] = 1;
+    const store = createMockStore([createMockGpsPoint()], {
+      alignmentMatrix: matrix,
+    });
+    const handlers = createRefPointHandlers(
+      createDefaultDeps({ getStore: () => store })
+    );
+
+    await handlers.handleMarkRefPoint();
+
+    const v2 = findV2Dispatch(store);
+    const v2Payload = v2!.payload as {
+      gpsPoint?: { latitude: number; longitude: number; altitude?: number };
+      rawGpsPoint: { latitude: number; longitude: number; altitude?: number };
+    };
+    expect(v2Payload.gpsPoint).toBeDefined();
+    expect(v2Payload.gpsPoint!.latitude).toBe(49.5);
+    expect(v2Payload.gpsPoint!.longitude).toBe(8.5);
+    expect(v2Payload.gpsPoint!.altitude).toBe(250);
+    // The raw snapshot is preserved untouched
+    expect(v2Payload.rawGpsPoint.latitude).toBe(49.0);
+    expect(v2Payload.rawGpsPoint.longitude).toBe(8.0);
+  });
+
+  it('omits gpsPoint when no alignment matrix is in effect', async () => {
+    vi.clearAllMocks();
+    mockIsRefPointPickerVisible.mockReturnValue(false);
+    mockGetCurrentArPose.mockReturnValue(createMockArPose());
+    mockGetCurrentScenarioHandle.mockReturnValue(createMockScenarioHandle());
+    mockShowRefPointPicker.mockResolvedValue({ id: 'bench', isNew: true });
+    // createMockStore default has alignmentMatrix=null
+    const store = createMockStore([createMockGpsPoint()]);
+    const handlers = createRefPointHandlers(
+      createDefaultDeps({ getStore: () => store })
+    );
+
+    await handlers.handleMarkRefPoint();
+
+    const v2 = findV2Dispatch(store);
+    const v2Payload = v2!.payload as { gpsPoint?: unknown };
+    expect(v2Payload.gpsPoint).toBeUndefined();
+  });
+
+  it('propagates the nearby anchor name on re-observation', async () => {
+    vi.clearAllMocks();
+    mockIsRefPointPickerVisible.mockReturnValue(false);
+    mockGetCurrentArPose.mockReturnValue(createMockArPose());
+    mockGetCurrentScenarioHandle.mockReturnValue(createMockScenarioHandle());
+    const store = createMockStore([createMockGpsPoint()]);
+    const handlers = createRefPointHandlers(
+      createDefaultDeps({ getStore: () => store })
+    );
+    // Imported ref point at the GPS position → re-observation path,
+    // picker is bypassed, name comes from the matched anchor.
+    handlers.setImportedRefPoints([
+      {
+        id: 'Bank',
+        name: 'Bank',
+        lat: 49.0,
+        lon: 8.0,
+        sourceZipName: 'prev.zip',
+      },
+    ]);
+
+    await handlers.handleMarkRefPoint();
+
+    const v2 = findV2Dispatch(store);
+    const v2Payload = v2!.payload as { name?: string };
+    expect(v2Payload.name).toBe('Bank');
+  });
+});

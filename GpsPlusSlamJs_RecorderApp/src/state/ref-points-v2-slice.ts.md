@@ -33,12 +33,12 @@ collapses the two.
   only in selectors, never in state.
 - `rawGpsPoint` is always present. `gpsPoint` is optional — absent for
   imported entries and for legacy entries replayed from pre-Step-1
-  recordings.
+  recordings. When present it carries the fused lat/lon (+altitude)
+  snapshot in `RawGpsPoint` shape — the visualizer reads only those
+  three fields, so storing the slim raw shape avoids re-deriving the
+  full state-side `GpsPoint`.
 - Reducers never mutate entries in-place; they only push or replace the
-  array. The structural cast in `addRefPointEntry` /
-  `setImportedRefPointEntries` bypasses Immer's WritableNonArrayDraft
-  refusal to widen the readonly tuples nested inside `GpsPoint` —
-  identical pattern to `ref-points-slice.ts` `setPriorRefPointMarks`.
+  array.
 
 ## Tests
 
