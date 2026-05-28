@@ -2,10 +2,12 @@
 
 ## Purpose
 
-3D-scene visualizer for captured camera frames. Each entry in the
-recorder's `framesInScene` slice (one per accepted
-`gpsData/add2dImage` action) becomes a textured square in the WebXR
-scene, anchored at the WebXR pose recorded at capture time.
+3D-scene visualizer for captured camera frames. Each entry surfaced
+by the framework's `selectFrameTilesInWebXR` selector (one per
+accepted `gpsData/add2dImage` action) becomes a textured square in
+the WebXR scene, anchored at the WebXR pose recorded at capture
+time. (Step 5.7a-2 deleted the legacy `framesInScene` mirror — the
+selector is now the sole source.)
 
 Part of F3 of
 [2026-05-26-tracking-quality-regression-and-replay-gaps-user-feedback.md](../../../../gps-plus-slam/GpsPlusSlamJs_Docs/docs/2026-05-26-tracking-quality-regression-and-replay-gaps-user-feedback.md).

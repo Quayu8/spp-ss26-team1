@@ -41,12 +41,6 @@ import { OpfsStorageBackend } from 'gps-plus-slam-app-framework/storage/opfs-sto
 import type { SessionMetadata as OpfsSessionMetadata } from 'gps-plus-slam-app-framework/storage/opfs-storage';
 import { routingReducer, type RoutingState } from './routing-slice';
 import { scenarioReducer, type ScenarioState } from './scenario-slice';
-import {
-  framesInSceneReducer,
-  type FramesInSceneState,
-} from './frames-in-scene-slice';
-import { createRefPointMarkListenerMiddleware } from './ref-point-mark-listener';
-import { createAdd2dImageListenerMiddleware } from './add-2d-image-listener';
 
 // --- Re-exports for backwards compatibility with consumers that previously
 // imported these from `gps-plus-slam-app-framework/state/store`. The framework
@@ -121,7 +115,6 @@ export interface CombinedRootState extends LibraryRootState {
   refPointsV2: RefPointsV2State;
   routing: RoutingState;
   scenario: ScenarioState;
-  framesInScene: FramesInSceneState;
 }
 
 /**
@@ -168,12 +161,7 @@ export function createRecorderStore(
       refPointsV2: refPointsV2Reducer,
       routing: routingReducer,
       scenario: scenarioReducer,
-      framesInScene: framesInSceneReducer,
     },
-    extraMiddleware: [
-      createRefPointMarkListenerMiddleware(),
-      createAdd2dImageListenerMiddleware(),
-    ],
   });
 
   return {

@@ -1,7 +1,7 @@
 /**
  * Frame-tile visualizer — renders captured camera frames as textured
- * 3D planes anchored at their capture pose. Each entry in the
- * `framesInScene` slice becomes one `THREE.Mesh` (shared
+ * 3D planes anchored at their capture pose. Each entry surfaced by
+ * `selectFrameTilesInWebXR` becomes one `THREE.Mesh` (shared
  * `PlaneGeometry`, per-tile `MeshBasicMaterial` with the frame's image
  * as its texture).
  *
@@ -12,12 +12,12 @@
  * tracking quality during live recording and audit coverage during
  * replay.
  *
- * Coordinate space: the slice stores raw WebXR pose verbatim from the
- * `add2dImage` payload (see `add-2d-image-listener.ts`). The
- * WebXR scene the visualizer attaches to is in the same frame, so the
- * pose is applied directly without `webxrToNUE` conversion — that
- * conversion is only relevant for the serialized `odometryPath` data
- * inside the library reducer.
+ * Coordinate space: `selectFrameTilesInWebXR` converts the library's
+ * NUE-stored `odometryPath.points` back to WebXR for the visualizer.
+ * The WebXR scene the visualizer attaches to is in the same frame, so
+ * the pose is applied directly. (Step 5.7a-2 deleted the legacy
+ * `framesInScene` slice + `add-2d-image-listener` mirror — the
+ * selector is now the sole source.)
  *
  * Scene is injected explicitly (no `getScene()` call) so the class
  * stays unit-testable and obeys the P3 rule used by

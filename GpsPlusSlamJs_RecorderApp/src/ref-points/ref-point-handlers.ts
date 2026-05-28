@@ -233,10 +233,11 @@ export function createRefPointHandlers(
     _timestamp: number,
     _fusedGpsPoint?: { latitude: number; longitude: number; altitude?: number }
   ): void {
-    // No-op as of F2 (2026-05-26 user feedback): the red current-session
-    // sphere is now driven exclusively by the `ref-point-mark-listener`
-    // middleware, which intercepts every `gpsData/markReferencePoint`
-    // action (live and replay) and dispatches `addCurrentRefPointMark`.
+    // No-op as of Step 5.7a-2: the red current-session sphere is now
+    // driven exclusively by `wireRefPointSubscribers`, which subscribes
+    // to `selectRefPointEntries` over the V2 slice. (The previous
+    // `ref-point-mark-listener` middleware was deleted along with the
+    // parallel `gpsData/markReferencePoint` dispatch in 5.7a-1.)
     // Keeping the function as a documented seam in case future visual
     // side effects (e.g., animation, audio cue) need to attach to the
     // live-mark flow only.

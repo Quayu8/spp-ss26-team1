@@ -11,9 +11,9 @@ the wirer reads from the framework selector
 `selectFrameTilesInWebXR(state)` instead of the recorder-local
 `state.framesInScene.frames` mirror. The selector pulls
 `state.gpsData.odometryPath.points` (the library's NUE-stored frames)
-and converts them back to WebXR coordinates. The legacy
-`framesInScene` slice and its listener are kept temporarily as a
-dead-writer mirror; both are removed in Step 5 of the same plan.
+and converts them back to WebXR coordinates. Step 5.7a-2 deleted
+the legacy `framesInScene` slice and its `add-2d-image-listener`
+mirror — `selectFrameTilesInWebXR` is now the sole source.
 
 ## Responsibilities
 

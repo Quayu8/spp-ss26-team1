@@ -212,9 +212,9 @@ let alignmentLerper: AlignmentLerper | null = null;
 // F3.5d — live frame-tile visualization. The recorder caches every captured
 // frame blob in memory keyed by its `frames/<filename>` path, so the
 // FrameTileVisualizer can paint the same textures the replay path uses.
-// The wirer subscribes to `framesInScene` (updated by F3.2's add2dImage
-// listener), and FrameTileVisualizer.addTile reads the blob out of this
-// cache. Cleared on `resetMainState`.
+// The wirer subscribes to `selectFrameTilesInWebXR` (memoised over
+// `state.gpsData.odometryPath.points`), and FrameTileVisualizer.addTile
+// reads the blob out of this cache. Cleared on `resetMainState`.
 const liveFrameBlobs = new Map<string, Blob>();
 let frameTileVisualizer: FrameTileVisualizer | null = null;
 let unsubscribeFrameTiles: (() => void) | null = null;
