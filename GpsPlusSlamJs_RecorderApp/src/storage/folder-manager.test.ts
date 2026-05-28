@@ -737,6 +737,56 @@ describe('createFolderManager', () => {
       ]);
     });
 
+    it('should dispatch setImportedRefPointEntries into refPointsV2 (Step 5.5)', async () => {
+      // Why: post-Step-5.5 the OPFS sidecar fast-path populates the new flat
+      // `refPointsV2` slice via `setImportedRefPointEntries`. The matcher
+      // (`selectKnownAnchorsByCell`) reads from there since Step 5.4. Each
+      // averaged ref point becomes a single `RefPointEntry` carrying the
+      // human-readable `name` and a `rawGpsPoint` synthesised from the
+      // averaged lat/lon/alt (timestamp 0 — sidecar entries are not
+      // live observations).
+      const { loadAllRefPoints, averageGpsPerRefPoint } =
+        await import('../storage/ref-point-loader');
+      vi.mocked(loadAllRefPoints).mockResolvedValue([
+        { id: 'p1', name: 'P1', createdAt: 1000, observations: [] },
+        { id: 'p2', name: 'P2', createdAt: 2000, observations: [] },
+      ] as never);
+      vi.mocked(averageGpsPerRefPoint).mockReturnValue([
+        { id: 'p1', name: 'P1', lat: 50.0, lon: 8.0, alt: 100 },
+        { id: 'p2', name: 'P2', lat: 51.0, lon: 9.0 },
+      ]);
+      const { manager, store } = createFolderManagerWithDefaults();
+
+      await manager.loadAndDisplayRefPoints(mockFolderHandle);
+
+      expect(store.dispatch).toHaveBeenCalledWith(
+        expect.objectContaining({
+          type: 'refPointsV2/setImportedRefPointEntries',
+          payload: [
+            expect.objectContaining({
+              id: 'p1',
+              name: 'P1',
+              timestamp: 0,
+              rawGpsPoint: expect.objectContaining({
+                latitude: 50.0,
+                longitude: 8.0,
+                altitude: 100,
+              }),
+            }),
+            expect.objectContaining({
+              id: 'p2',
+              name: 'P2',
+              timestamp: 0,
+              rawGpsPoint: expect.objectContaining({
+                latitude: 51.0,
+                longitude: 9.0,
+              }),
+            }),
+          ],
+        })
+      );
+    });
+
     it('should forward averaged ref points to map overlay for 2D display', async () => {
       // Why: Prior ref points must appear on the 2D Leaflet map
       const { loadAllRefPoints, averageGpsPerRefPoint } =

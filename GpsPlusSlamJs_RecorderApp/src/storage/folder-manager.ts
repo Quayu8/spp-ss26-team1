@@ -36,6 +36,7 @@ import {
   setCurrentScenarioName,
   setPriorRefPointMarks,
 } from '../state/recorder-store';
+import { setImportedRefPointEntries } from '../state/ref-points-v2-slice';
 import type { RecorderStore } from '../state/recorder-store';
 
 const log = createLogger('FolderManager');
@@ -338,6 +339,27 @@ export function createFolderManager(deps: FolderManagerDeps): FolderManager {
         alt: rp.alt,
         sourceZipName: '',
       }))
+    );
+
+    // Step 5.5: also populate the flat `refPointsV2` slice — the matcher
+    // (`selectKnownAnchorsByCell`) has read from there since Step 5.4.
+    // Each averaged ref point becomes a single sidecar `RefPointEntry`
+    // with `timestamp: 0` (these are not live observations).
+    deps.getStore().dispatch(
+      setImportedRefPointEntries(
+        averaged.map((rp) => ({
+          id: rp.id,
+          timestamp: 0,
+          name: rp.name,
+          rawGpsPoint: {
+            id: `imported-${rp.id}`,
+            latitude: rp.lat,
+            longitude: rp.lon,
+            ...(rp.alt !== undefined ? { altitude: rp.alt } : {}),
+            timestamp: 0,
+          },
+        }))
+      )
     );
 
     // 2D map display
