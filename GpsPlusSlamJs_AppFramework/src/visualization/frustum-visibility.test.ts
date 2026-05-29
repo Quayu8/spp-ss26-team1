@@ -186,4 +186,25 @@ describe('isObjectInCameraFrustum', () => {
     expect(() => isObjectInCameraFrustum(camera, group)).not.toThrow();
     expect(isObjectInCameraFrustum(camera, group)).toBe(true);
   });
+
+  // Why this test matters: the helper deliberately reads `geometry`
+  // structurally instead of casting to `THREE.Mesh`, so non-mesh renderables
+  // that also carry a `geometry` (e.g. `Points`, `Line`) are frustum-tested
+  // via their own bounding sphere just like meshes. This pins that contract
+  // and guards against a regression to a `Mesh`-only cast that would silently
+  // skip the geometry path for these types.
+  it('uses the geometry bounding sphere for non-Mesh renderables (Points, Line)', () => {
+    const camera = makeCamera();
+    const geom = new THREE.SphereGeometry(1, 8, 8);
+
+    const points = new THREE.Points(geom, new THREE.PointsMaterial());
+    points.position.set(0, 0, -5);
+    points.updateMatrixWorld();
+    expect(isObjectInCameraFrustum(camera, points)).toBe(true);
+
+    const line = new THREE.Line(geom, new THREE.LineBasicMaterial());
+    line.position.set(1000, 0, -5);
+    line.updateMatrixWorld();
+    expect(isObjectInCameraFrustum(camera, line)).toBe(false);
+  });
 });

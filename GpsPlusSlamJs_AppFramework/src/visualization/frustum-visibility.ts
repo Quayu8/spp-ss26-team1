@@ -76,7 +76,9 @@ const objectScratchSphere = new THREE.Sphere();
 /**
  * Check whether an `Object3D` is currently (at least partially) inside the
  * camera frustum. Computes the object's world bounding sphere by taking the
- * geometry's local bounding sphere and applying `matrixWorld`. For objects
+ * geometry's local bounding sphere and applying `matrixWorld`. Works for any
+ * renderable carrying a `geometry` (`Mesh`, `Points`, `Line`, …), since the
+ * property is read structurally rather than via a `Mesh` cast. For objects
  * without geometry (e.g. plain `Group`s used as anchor containers) there is no
  * bounding sphere to test, so they are treated as "in frustum" (`true`). This
  * is the conservative default for visibility gating and deliberately avoids
@@ -93,9 +95,11 @@ export function isObjectInCameraFrustum(
   frustum?: THREE.Frustum
 ): boolean {
   const f = frustum ?? buildCameraFrustum(camera);
-  // Prefer the mesh's own bounding sphere (cheap, deterministic) when present.
-  const mesh = object as THREE.Mesh;
-  const geometry = mesh.geometry;
+  // Prefer the object's own geometry bounding sphere (cheap, deterministic)
+  // when present. Any renderable that carries a `geometry` works here —
+  // `Mesh`, `Points`, `Line`, etc. — so we test the property structurally
+  // rather than asserting a specific subclass like `THREE.Mesh`.
+  const geometry = (object as { geometry?: THREE.BufferGeometry }).geometry;
   if (geometry) {
     if (!geometry.boundingSphere) {
       geometry.computeBoundingSphere();
