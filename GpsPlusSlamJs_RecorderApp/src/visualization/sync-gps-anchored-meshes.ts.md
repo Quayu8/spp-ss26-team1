@@ -32,6 +32,11 @@ stateful `GpsAnchoredMeshManager` class (see P2 in
 - **Id-based diff:** present-in-both → update `position` in place;
   new id → create mesh + `scene.add`; gone id → `scene.remove` (mesh is
   discarded but its geometry/material are kept alive via the cache).
+- **Duplicate ids within `items` are deduplicated.** `items` may come from
+  external/loaded data with no uniqueness guarantee (e.g.
+  `displayPriorRefPoints`). A repeated id reuses the single mesh for that
+  id (last occurrence's coords win) rather than allocating an untracked
+  second mesh — avoiding a permanent scene/GPU leak.
 - Mesh `name` is `${namePrefix}-${item.id}` for parity with the historical
   `GpsAnchoredMeshManager` output (so any DOM- or scene-traversal-based
   test that asserted on names continues to work).
@@ -61,7 +66,8 @@ function showPrior(items: GpsAnchoredItem[]) {
 See [sync-gps-anchored-meshes.test.ts](sync-gps-anchored-meshes.test.ts).
 Coverage: create, replace, update-in-place, remove-gone-ids, shared
 resources reused across calls, distinct resources per (color, radius),
-empty-input cleanup, idempotent update on unchanged coords.
+empty-input cleanup, idempotent update on unchanged coords, and
+duplicate-id deduplication (no orphaned meshes).
 
 ## Related docs
 

@@ -109,7 +109,12 @@ export function syncGpsAnchoredMeshes(
       it.altitude ?? 0,
       0
     );
-    let mesh = prevHandles.get(it.id);
+    // Consult `next` first so a duplicate id within the *same* `items`
+    // array reuses the mesh already created this call instead of
+    // allocating a second, untracked one (last occurrence's coords win).
+    // `items` may come from external/loaded data that does not guarantee
+    // unique ids, so this dedup prevents a permanent scene/GPU leak.
+    let mesh = next.get(it.id) ?? prevHandles.get(it.id);
     if (!mesh) {
       mesh = new THREE.Mesh(geometry, material);
       mesh.name = `${namePrefix}-${it.id}`;

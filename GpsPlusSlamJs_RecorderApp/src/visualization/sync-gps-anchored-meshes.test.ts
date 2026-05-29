@@ -11,7 +11,10 @@
 
 import { describe, it, expect, beforeEach } from 'vitest';
 import * as THREE from 'three';
-import { validateLicenseKey } from 'gps-plus-slam-app-framework/core';
+import {
+  validateLicenseKey,
+  calcRelativeCoordsInMeters,
+} from 'gps-plus-slam-app-framework/core';
 import { COMMUNITY_LICENSE_KEY } from 'gps-plus-slam-app-framework/licensing';
 import {
   syncGpsAnchoredMeshes,
@@ -243,6 +246,44 @@ describe('syncGpsAnchoredMeshes', () => {
       { zeroRef: ZERO, color: 0x00ff00, namePrefix: 'p', radius: 0.5 }
     );
     expect(small.get('a')!.geometry).not.toBe(big.get('a')!.geometry);
+  });
+
+  // Why this test matters: regression for the duplicate-id orphan leak.
+  // `items` may originate from external/loaded data (e.g.
+  // `displayPriorRefPoints(RefPointMark[])`) which does NOT guarantee
+  // unique ids. Before the fix the loop only consulted `prevHandles`, so
+  // a duplicate id that was absent from `prevHandles` created a fresh mesh
+  // (and `scene.add`'d it) on every occurrence while only the last landed
+  // in the returned map. The earlier meshes were untracked → could never
+  // be removed by a later reconcile → permanent scene/GPU leak.
+  it('deduplicates ids within the same items array (no orphaned meshes)', () => {
+    const handles = syncGpsAnchoredMeshes(
+      scene,
+      new Map(),
+      [
+        item('dup', 50.7496, 6.4794),
+        item('dup', 50.75, 6.48), // same id, different coords
+        item('other', 50.7497, 6.4795),
+      ],
+      { zeroRef: ZERO, color: 0x00ff00, namePrefix: 'p' }
+    );
+
+    // Exactly one mesh per distinct id — no orphan left behind.
+    expect(handles.size).toBe(2);
+    expect(scene.children).toHaveLength(2);
+
+    const dupMesh = handles.get('dup')!;
+    // The returned handle is the single mesh actually present in the scene.
+    expect(scene.children).toContain(dupMesh);
+    // Last occurrence's coords win.
+    const expected = calcRelativeCoordsInMeters(
+      ZERO,
+      { lat: 50.75, lon: 6.48 },
+      0,
+      0
+    );
+    expect(dupMesh.position.x).toBeCloseTo(expected[0], 5);
+    expect(dupMesh.position.z).toBeCloseTo(expected[2], 5);
   });
 
   it('does not call mesh.position.set if the world coords are unchanged (idempotent update)', () => {
