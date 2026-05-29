@@ -19,7 +19,12 @@
 import { describe, it, expect, beforeAll } from 'vitest';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import { loadRecording, type LoadedRecording } from './recording-loader';
+import {
+  loadRecording,
+  isMarkRefPointAction,
+  type LoadedRecording,
+} from './recording-loader';
+import type { RecordedAction } from 'gps-plus-slam-app-framework/storage/zip-reader';
 
 const RECORDINGS_DIR = path.resolve(__dirname, '../../../../TestDataJs');
 const OLD_ZIP = path.join(RECORDINGS_DIR, '2026-03-05_06-47-31utc.zip');
@@ -117,5 +122,49 @@ describe('loadRecording — version-transparent loader', () => {
       const second = newLoaded!.getFinalState();
       expect(first).toBe(second);
     });
+  });
+});
+
+/**
+ * Boundary-contract tests for {@link isMarkRefPointAction}.
+ *
+ * Why this matters: the guard is the only validation of the pose arrays on
+ * the action-derived ref-point path (the migration layer validates GPS
+ * coordinates but never `position`/`rotation`). `buildDefsFromActions`
+ * unconditionally reads `position[0..2]` and `rotation[0..3]`, so a short
+ * array that merely passes `Array.isArray` would inject `undefined` into the
+ * typed number tuples (`Vector3` / `Quaternion`) and silently corrupt every
+ * downstream consumer of the observation's `arPose`. The guard must reject
+ * such payloads up front.
+ */
+describe('isMarkRefPointAction — pose-array length contract', () => {
+  const baseAction = (
+    position: number[],
+    rotation: number[]
+  ): RecordedAction => ({
+    type: 'gpsData/markReferencePoint',
+    payload: {
+      id: 'h3-abc',
+      position,
+      rotation,
+      timestamp: 1_700_000_000_000,
+      rawGpsPoint: { latitude: 50.77, longitude: 6.08 },
+    },
+  });
+
+  it('accepts a full-length position (3) and rotation (4)', () => {
+    expect(isMarkRefPointAction(baseAction([1, 2, 3], [0, 0, 0, 1]))).toBe(true);
+  });
+
+  it('rejects a position with fewer than 3 elements', () => {
+    expect(isMarkRefPointAction(baseAction([1, 2], [0, 0, 0, 1]))).toBe(false);
+  });
+
+  it('rejects a rotation with fewer than 4 elements', () => {
+    expect(isMarkRefPointAction(baseAction([1, 2, 3], [0, 0, 1]))).toBe(false);
+  });
+
+  it('rejects empty pose arrays even though they are arrays', () => {
+    expect(isMarkRefPointAction(baseAction([], []))).toBe(false);
   });
 });

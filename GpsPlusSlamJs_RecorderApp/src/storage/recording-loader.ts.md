@@ -19,10 +19,13 @@ Background and motivation: [`2026-05-19-recording-loader-abstraction-plan.md`](.
   - `capabilities: { hasSidecarRefPoints, hasFusedObservations, hasSessionMeta, migrationApplied }`.
   - `getFinalState(): CombinedRootState` — lazy, memoized replay into a fresh recorder store (`NullStorageBackend`, dev checks disabled).
 - `RecordingCapabilities`, `LoadedRecording` — re-exported types.
+- `isMarkRefPointAction(a: RecordedAction): a is RecordedAction & { payload: MarkRefPointPayload }`
+  - Type guard for a well-formed `gpsData/markReferencePoint` action. Validates `payload.id` (string), `payload.timestamp` (number), and the pose arrays **by length**: `position` must have ≥ 3 elements (`Vector3`) and `rotation` ≥ 4 (`Quaternion`). Exported for direct unit testing of this boundary contract.
 
 ## Invariants & Assumptions
 
 - The migration layer is the single source of schema canonicalization. Action-derived ref-point reconstruction reads `payload.rawGpsPoint` (post-migration name) and only falls back to `payload.gpsPoint` defensively.
+- Pose-array length is validated at the `isMarkRefPointAction` boundary, not just array-ness. The migration layer validates GPS coordinates but never `position`/`rotation`, so this guard is the only thing stopping a short array from injecting `undefined` into the typed number tuples that `buildDefsFromActions` writes (`position[2]`, `rotation[3]`).
 - Merge rule: action-derived defs are loaded first, then sidecar defs overwrite by id. This guarantees sidecar wins whenever both exist for the same `id`.
 - `sessionId` for synthesized observations is taken from the `recording/startSession` action's `payload.sessionName`. Falls back to `${meta.contextTag}-${meta.startedAt}`, then `'legacy-session'`. Stable per-recording but not globally unique for legacy recordings without a startSession action — acceptable because consumers (visualizer, audit) only use `sessionId` for grouping.
 - `getFinalState()` constructs a brand-new store on first call and caches the result. Suitable for tests and one-off audits; not suitable for long-running replay UIs (use the dedicated replay engine for those).
@@ -58,5 +61,6 @@ const state = rec.getFinalState();
   - `2026-03-05_06-47-31utc.zip` (era ≤ 3): asserts `migrationApplied`, no sidecars, refPoints reconstructed from actions with finite lat/lon.
   - `2026-04-23_15-55-36utc.zip` (era ≥ 4): asserts sidecar present, session.json present, at least one curated name (`name !== id`).
   - `getFinalState()` is memoized (`first === second`).
+  - `isMarkRefPointAction — pose-array length contract`: fixture-free unit tests that accept full-length poses (3/4) and reject short or empty `position`/`rotation` arrays, proving the guard blocks `undefined`-injecting payloads.
 
 Tests skip themselves when `TestDataJs/` is not on disk (CI without test corpus).

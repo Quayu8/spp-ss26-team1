@@ -120,7 +120,19 @@ interface MarkRefPointPayload {
   readonly gpsPoint?: MarkRefPointGpsPoint;
 }
 
-function isMarkRefPointAction(
+/**
+ * Narrow a {@link RecordedAction} to a well-formed `markReferencePoint`.
+ *
+ * The pose arrays are validated for length, not just array-ness: `position`
+ * is a {@link Vector3} (3 elements) and `rotation` a {@link Quaternion} (4
+ * elements). Without the length guard a short array would slip through and
+ * {@link buildDefsFromActions} would write `undefined` into the typed number
+ * tuples (`payload.position[2]`, `payload.rotation[3]`), corrupting every
+ * downstream consumer of the observation's `arPose`.
+ *
+ * Exported for direct unit testing of this boundary contract.
+ */
+export function isMarkRefPointAction(
   a: RecordedAction
 ): a is RecordedAction & { payload: MarkRefPointPayload } {
   if (a.type !== 'gpsData/markReferencePoint') return false;
@@ -128,7 +140,9 @@ function isMarkRefPointAction(
   return (
     typeof p?.id === 'string' &&
     Array.isArray(p.position) &&
+    p.position.length >= 3 &&
     Array.isArray(p.rotation) &&
+    p.rotation.length >= 4 &&
     typeof p.timestamp === 'number'
   );
 }
