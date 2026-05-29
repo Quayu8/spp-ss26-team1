@@ -17,10 +17,13 @@
 import { describe, it, expect } from 'vitest';
 import type { RawGpsPoint } from './recorder-store';
 import {
+  addRefPointEntry,
   countEntriesByCellInSession,
+  refPointsReducer,
   selectImportedKnownAnchors,
   selectKnownAnchorsByCell,
   selectRefPointEntries,
+  setImportedRefPointEntries,
   type RefPointEntry,
   type RefPointsState,
 } from './ref-points-slice';
@@ -211,5 +214,71 @@ describe('countEntriesByCellInSession', () => {
     ]);
     const counts = countEntriesByCellInSession(state, 400, 1000);
     expect(counts.get(ID_A)).toBe(2);
+  });
+});
+
+/**
+ * Conflict rule (plan §A.2 / §B.5 5.5): the action log is canonical and
+ * the OPFS sidecar is only a cache. At startup the sidecar is hydrated
+ * first via `setImportedRefPointEntries` (which *replaces* the array),
+ * then the current session's action log is replayed on top via
+ * `addRefPointEntry`. When the two disagree for a given H3 cell, the
+ * live observation from the action log must survive into the
+ * post-startup state — it is the value the sidecar is later rewritten
+ * from on the next mark.
+ */
+describe('conflict rule: sidecar vs action log', () => {
+  const GPS_A = raw(50.1, 6.1); // sidecar cache value
+  const GPS_B = raw(50.5, 6.5); // action-log (canonical) value
+
+  function hydrateInStartupOrder(): RefPointsState {
+    // 1. Sidecar fast-path: imported entry carries the `timestamp: 0`
+    //    marker that folder-manager forces for cache entries.
+    let state = refPointsReducer(
+      undefined,
+      setImportedRefPointEntries([
+        { id: ID_A, timestamp: 0, name: 'Bench Corner', rawGpsPoint: GPS_A },
+      ])
+    );
+    // 2. Action-log replay appends the live observation for the same cell.
+    state = refPointsReducer(
+      state,
+      addRefPointEntry({ id: ID_A, timestamp: 1000, rawGpsPoint: GPS_B })
+    );
+    return state;
+  }
+
+  it('post-startup state contains the action-log GPS (gps: B)', () => {
+    const entries = selectRefPointEntries(hydrateInStartupOrder());
+    const observation = entries.find((e) => e.timestamp === 1000);
+    expect(observation?.rawGpsPoint.latitude).toBe(GPS_B.latitude);
+    expect(observation?.rawGpsPoint.longitude).toBe(GPS_B.longitude);
+  });
+
+  it('keeps the sidecar imported anchor distinguishable by its timestamp:0 marker', () => {
+    const state = hydrateInStartupOrder();
+    const imported = selectImportedKnownAnchors(state);
+    // Only the sidecar entry (timestamp 0) is projected as an import;
+    // the live observation is excluded.
+    expect(imported).toHaveLength(1);
+    expect(imported[0]?.lat).toBe(GPS_A.latitude);
+  });
+
+  it('replacing the array (sidecar after action log) would clobber the live observation — proving the documented order matters', () => {
+    // Reverse order: action log first, then sidecar hydrate.
+    let state = refPointsReducer(
+      undefined,
+      addRefPointEntry({ id: ID_A, timestamp: 1000, rawGpsPoint: GPS_B })
+    );
+    state = refPointsReducer(
+      state,
+      setImportedRefPointEntries([
+        { id: ID_A, timestamp: 0, name: 'Bench Corner', rawGpsPoint: GPS_A },
+      ])
+    );
+    const entries = selectRefPointEntries(state);
+    // The live observation is gone — setImportedRefPointEntries replaced
+    // the whole array. This is why the sidecar must hydrate FIRST.
+    expect(entries.some((e) => e.timestamp === 1000)).toBe(false);
   });
 });
