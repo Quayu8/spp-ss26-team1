@@ -71,11 +71,17 @@ function resolveEllipsoidScale(
 ): { horizontal: number; vertical: number } | null {
   if (accuracy === undefined) return null;
   const { horizontal, vertical } = accuracy;
+  // `typeof === 'number'` narrows `number | undefined` to `number`, so the
+  // finite/range checks below operate on a non-nullable value without any
+  // `!` assertions.
+  if (typeof horizontal !== 'number' || typeof vertical !== 'number') {
+    return null;
+  }
   if (!Number.isFinite(horizontal) || !Number.isFinite(vertical)) {
     return null;
   }
-  if (!(horizontal! > 0) || !(vertical! > 0)) return null;
-  return { horizontal: horizontal!, vertical: vertical! };
+  if (horizontal <= 0 || vertical <= 0) return null;
+  return { horizontal, vertical };
 }
 
 /**
