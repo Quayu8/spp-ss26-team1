@@ -28,7 +28,7 @@ Factory function that creates a folder manager instance with injected dependenci
 
 Dependencies injected from `main.ts`:
 
-- **Cross-module state:** `getIsReplayMode`, `setReplayZipScenariosCache`, `setImportedRefPoints`
+- **Cross-module state:** `getIsReplayMode`, `setReplayZipScenariosCache`
 - **UI callbacks:** `showError`, `updateStatus`, `populateScenarios`, `setFolderSelected`, `setSaveLocationSelected`, `validateEnterButton`, `listScenariosFromFolder`, `extractScenarioNamesFromZips`, `discoverScenariosFromZipMetadata`, `populateReplayScenarios`, `updateFolderStatus`, `updateSaveStatus`
 - **Optional:** `mapOverlay?: { addPriorRefPoints, clearPriorRefPoints }` — 2D map display for prior ref points
 
@@ -39,7 +39,7 @@ UI functions are injected (not imported directly) to respect the `storage/ → u
 - `handleOpenFolder` checks `getIsReplayMode()` to branch between recording-mode (list scenarios, no ref point import) and replay-mode (discover zip metadata + populate replay UI). Ref point import happens at scenario-selection time via `loadAndDisplayRefPoints`.
 - In recording mode, folder and zip scenario names are merged and deduplicated before populating the dropdown.
 - `loadAndDisplayRefPoints` clears existing visualized ref points before displaying new ones.
-- **Step 5.5**: `loadAndDisplayRefPoints` additionally dispatches `setImportedRefPointEntries` into the flat `refPoints` slice — the canonical store source for the H3 matcher since Step 5.4. Each averaged ref point becomes a single `RefPointEntry` with `timestamp: 0` (sidecar entries are not live observations) and a synthesised `rawGpsPoint` carrying the averaged lat/lon and (optional) altitude. The legacy `deps.setImportedRefPoints` write into the `refPoints` slice stays in place as a no-op double-write until Step 5.7 of the [2026-05-27 slice-collapse plan](../../../../gps-plus-slam/GpsPlusSlamJs_Docs/docs/2026-05-27-collapse-refpoint-and-frame-slices-plan.md) removes the legacy slice. Conflict rule: when an action-log replay (Step 5.6 translator) later appends `addRefPointEntry` rows for the same H3 cell, the new entries are appended after the sidecar entries; `selectKnownAnchorsByCell` keeps the first-non-null-`name` per cell, so the human-readable label from the sidecar wins for the `displayName` while live observations still contribute their own lat/lon snapshots to `state.refPoints.entries` for downstream consumers.
+- **Ref-point import**: `loadAndDisplayRefPoints` dispatches `setImportedRefPointEntries` into the flat `refPoints` slice — the canonical store source for the H3 matcher since Step 5.4. Each averaged ref point becomes a single `RefPointEntry` with `timestamp: 0` (sidecar entries are not live observations) and a synthesised `rawGpsPoint` carrying the averaged lat/lon and (optional) altitude. (The legacy `deps.setImportedRefPoints` double-write was removed in 5.7a-3 of the [2026-05-27 slice-collapse plan](../../../../gps-plus-slam/GpsPlusSlamJs_Docs/docs/2026-05-27-collapse-refpoint-and-frame-slices-plan.md).) Conflict rule: when an action-log replay (Step 5.6 translator) later appends `addRefPointEntry` rows for the same H3 cell, the new entries are appended after the sidecar entries; `selectKnownAnchorsByCell` keeps the first-non-null-`name` per cell, so the human-readable label from the sidecar wins for the `displayName` while live observations still contribute their own lat/lon snapshots to `state.refPoints.entries` for downstream consumers.
 - `handleChooseSaveLocation` is a no-op (with error toast) when `isExternalStorageSupported()` returns false.
 
 ## Examples
@@ -49,7 +49,6 @@ const folderManager = createFolderManager({
   getIsReplayMode: () => replayHandlers.getIsReplayMode(),
   setReplayZipScenariosCache: (c) =>
     replayHandlers.setReplayZipScenariosCache(c),
-  setImportedRefPoints: (rp) => refPointHandlers.setImportedRefPoints(rp),
   showError,
   updateStatus,
   populateScenarios,

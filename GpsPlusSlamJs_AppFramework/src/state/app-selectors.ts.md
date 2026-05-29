@@ -44,4 +44,4 @@ Covered by `app-selectors.test.ts` (13 test cases):
 - [subscribe-to-selector.ts](subscribe-to-selector.ts) — uses these selectors for change detection
 - [store-subscribers.ts](store-subscribers.ts) — primary consumer
 - [store.ts](store.ts) — `CombinedRootState` type definition
-- [ref-points-slice.ts](ref-points-slice.ts) — `selectCachedKnownRefPoints` follows the same pattern
+- [ref-points-slice.ts](ref-points-slice.ts) — `selectImportedKnownAnchors` follows the same pattern
