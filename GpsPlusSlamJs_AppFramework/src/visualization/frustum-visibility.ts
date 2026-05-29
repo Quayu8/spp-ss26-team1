@@ -72,22 +72,38 @@ export function isSphereInCameraFrustum(
 }
 
 const objectScratchSphere = new THREE.Sphere();
+const objectScratchBox = new THREE.Box3();
+const objectScratchVec = new THREE.Vector3();
 
 /**
  * Check whether an `Object3D` is currently (at least partially) inside the
- * camera frustum. Computes the object's world bounding sphere by taking the
- * geometry's local bounding sphere and applying `matrixWorld`. Works for any
- * renderable carrying a `geometry` (`Mesh`, `Points`, `Line`, …), since the
- * property is read structurally rather than via a `Mesh` cast. For objects
- * without geometry (e.g. plain `Group`s used as anchor containers) there is no
- * bounding sphere to test, so they are treated as "in frustum" (`true`). This
- * is the conservative default for visibility gating and deliberately avoids
- * `Frustum.intersectsObject`, which unconditionally dereferences
- * `object.geometry.boundingSphere` and therefore throws for geometry-less
- * objects.
+ * camera frustum. The world bounding volume is resolved in tiers, cheapest
+ * first, so each common Three.js object type is gated by where it actually
+ * draws:
  *
- * Callers should ensure `object.updateMatrixWorld()` has already run this
- * frame (it normally has, via `renderer.render`).
+ *  1. **Sprites** (`isSprite`) are screen-space billboards with no meaningful
+ *     world geometry, so their world-space origin is tested as a point.
+ *  2. **Objects carrying an object-level `boundingSphere`** (`InstancedMesh`,
+ *     `SkinnedMesh`, or any caller that pre-populates one) use that sphere,
+ *     which reflects the instance spread / posed extent — unlike the base
+ *     geometry sphere. It is computed lazily via `computeBoundingSphere()`
+ *     when missing.
+ *  3. **Single renderables carrying a `geometry`** (`Mesh`, `Points`, `Line`,
+ *     …) use the geometry's local bounding sphere × `matrixWorld`.
+ *  4. **Containers with children** (`Group`, `LOD`, …) use the world-space
+ *     union of their descendants' bounding boxes (`Box3.setFromObject`),
+ *     converted to a sphere.
+ *  5. **Truly empty / geometry-less objects** have no bounding volume and are
+ *     treated as visible (`true`) — the conservative default for visibility
+ *     gating.
+ *
+ * This deliberately avoids `Frustum.intersectsObject`, which unconditionally
+ * dereferences `object.geometry.boundingSphere` and therefore throws a
+ * `TypeError` for geometry-less objects such as `Group`s.
+ *
+ * Callers should ensure `object.updateMatrixWorld()` (with descendants, for
+ * containers: `updateMatrixWorld(true)`) has already run this frame (it
+ * normally has, via `renderer.render`).
  */
 export function isObjectInCameraFrustum(
   camera: THREE.Camera,
@@ -95,22 +111,100 @@ export function isObjectInCameraFrustum(
   frustum?: THREE.Frustum
 ): boolean {
   const f = frustum ?? buildCameraFrustum(camera);
-  // Prefer the object's own geometry bounding sphere (cheap, deterministic)
-  // when present. Any renderable that carries a `geometry` works here —
-  // `Mesh`, `Points`, `Line`, etc. — so we test the property structurally
-  // rather than asserting a specific subclass like `THREE.Mesh`.
+
+  // Tier 1 — Sprite: screen-space billboard, no representative world geometry.
+  // Test its world-space origin as a point.
+  if ((object as { isSprite?: boolean }).isSprite) {
+    object.getWorldPosition(objectScratchVec);
+    return f.containsPoint(objectScratchVec);
+  }
+
+  // Tiers 2–4: resolve a world-space bounding sphere into `objectScratchSphere`
+  // (object-level sphere → geometry sphere → children union). If none applies
+  // the object has no bounding volume and we fall back to the conservative
+  // "visible" default (Tier 5).
+  if (!resolveObjectWorldSphere(object, objectScratchSphere)) {
+    return true;
+  }
+  return f.intersectsSphere(objectScratchSphere);
+}
+
+/**
+ * Resolve the world-space bounding sphere for `object` into `out`, returning
+ * `true` when a bounding volume was found and `false` for objects that have
+ * none (e.g. an empty `Group`). Resolution order mirrors the tiers documented
+ * on {@link isObjectInCameraFrustum}: object-level `boundingSphere`
+ * (`InstancedMesh`/`SkinnedMesh`), then geometry bounding sphere, then the
+ * world-space union of descendant bounding boxes.
+ */
+function resolveObjectWorldSphere(
+  object: THREE.Object3D,
+  out: THREE.Sphere
+): boolean {
+  // Tier 2 — object-level bounding sphere (instance spread / posed extent).
+  if (tryObjectLevelSphere(object, out)) {
+    return true;
+  }
+
+  // Tier 3 — single renderable carrying a `geometry` (Mesh, Points, Line, …).
   const geometry = (object as { geometry?: THREE.BufferGeometry }).geometry;
   if (geometry) {
     if (!geometry.boundingSphere) {
       geometry.computeBoundingSphere();
     }
-    const bs = geometry.boundingSphere;
-    if (bs) {
-      objectScratchSphere.copy(bs).applyMatrix4(object.matrixWorld);
-      return f.intersectsSphere(objectScratchSphere);
+    if (geometry.boundingSphere) {
+      out.copy(geometry.boundingSphere).applyMatrix4(object.matrixWorld);
+      return true;
     }
   }
-  // Geometry-less object (e.g. Group): no bounding sphere to test. Treat as
-  // visible rather than calling Frustum.intersectsObject, which would throw.
+
+  // Tier 4 — container (Group, LOD, …): union descendant world bounding boxes.
+  if (object.children.length > 0) {
+    objectScratchBox.setFromObject(object);
+    if (!objectScratchBox.isEmpty()) {
+      objectScratchBox.getBoundingSphere(out);
+      return true;
+    }
+  }
+
+  // Tier 5 — no bounding volume.
+  return false;
+}
+
+/**
+ * Tier 2 of {@link resolveObjectWorldSphere}: use an object-level
+ * `boundingSphere` when the object is an `InstancedMesh`/`SkinnedMesh` (whose
+ * sphere reflects instance spread / posed extent) or already carries a
+ * populated sphere. Computes it lazily via `computeBoundingSphere()` when
+ * missing. Writes the world-space sphere into `out` and returns `true` on
+ * success, `false` when no object-level sphere applies.
+ */
+function tryObjectLevelSphere(
+  object: THREE.Object3D,
+  out: THREE.Sphere
+): boolean {
+  const withSphere = object as {
+    boundingSphere?: THREE.Sphere | null;
+    computeBoundingSphere?: () => void;
+    isInstancedMesh?: boolean;
+    isSkinnedMesh?: boolean;
+  };
+  const eligible =
+    withSphere.isInstancedMesh ||
+    withSphere.isSkinnedMesh ||
+    withSphere.boundingSphere;
+  if (!eligible) {
+    return false;
+  }
+  if (
+    !withSphere.boundingSphere &&
+    typeof withSphere.computeBoundingSphere === 'function'
+  ) {
+    withSphere.computeBoundingSphere();
+  }
+  if (!withSphere.boundingSphere) {
+    return false;
+  }
+  out.copy(withSphere.boundingSphere).applyMatrix4(object.matrixWorld);
   return true;
 }

@@ -207,4 +207,163 @@ describe('isObjectInCameraFrustum', () => {
     line.updateMatrixWorld();
     expect(isObjectInCameraFrustum(camera, line)).toBe(false);
   });
+
+  // --- Tier A: composite/container objects (Group, LOD, …) -----------------
+  // Why these tests matter: GpsAnchor anchors are frequently plain `Group`
+  // containers whose *visible* content lives in child meshes. The original
+  // helper treated every geometry-less object as "always in frustum", which
+  // means a container that is entirely off-screen would never be culled. These
+  // tests pin the stronger contract: a container's visibility is the union of
+  // its descendants' world bounding volumes.
+  describe('Tier A: containers with children', () => {
+    it('returns true for a Group whose child mesh is in front of the camera', () => {
+      const camera = makeCamera();
+      const group = new THREE.Group();
+      const mesh = makeUnitSphereMesh();
+      mesh.position.set(0, 0, -5);
+      group.add(mesh);
+      group.updateMatrixWorld(true);
+      expect(isObjectInCameraFrustum(camera, group)).toBe(true);
+    });
+
+    it('returns false for a Group whose only child is far outside the FOV', () => {
+      const camera = makeCamera();
+      const group = new THREE.Group();
+      const mesh = makeUnitSphereMesh();
+      mesh.position.set(1000, 0, -5);
+      group.add(mesh);
+      group.updateMatrixWorld(true);
+      // If the helper still used the old "geometry-less ⇒ always true" default
+      // this would wrongly be true. The union-of-children box must drive it.
+      expect(isObjectInCameraFrustum(camera, group)).toBe(false);
+    });
+
+    it('unions multiple children (off-screen + on-screen ⇒ visible)', () => {
+      const camera = makeCamera();
+      const group = new THREE.Group();
+      const offscreen = makeUnitSphereMesh();
+      offscreen.position.set(1000, 0, -5);
+      const onscreen = makeUnitSphereMesh();
+      onscreen.position.set(0, 0, -5);
+      group.add(offscreen, onscreen);
+      group.updateMatrixWorld(true);
+      expect(isObjectInCameraFrustum(camera, group)).toBe(true);
+    });
+
+    it('works for THREE.LOD (its level meshes are children)', () => {
+      const camera = makeCamera();
+      const lod = new THREE.LOD();
+      const near = makeUnitSphereMesh();
+      lod.addLevel(near, 0);
+      lod.position.set(0, 0, -5);
+      lod.updateMatrixWorld(true);
+      expect(isObjectInCameraFrustum(camera, lod)).toBe(true);
+    });
+
+    it('still treats a truly empty container (no geometry anywhere) as visible', () => {
+      const camera = makeCamera();
+      const outer = new THREE.Group();
+      const innerEmpty = new THREE.Group();
+      outer.add(innerEmpty);
+      outer.position.set(1000, 0, -5);
+      outer.updateMatrixWorld(true);
+      // No descendant carries geometry ⇒ no bounding volume ⇒ conservative
+      // default applies.
+      expect(isObjectInCameraFrustum(camera, outer)).toBe(true);
+    });
+  });
+
+  // --- Tier B: objects carrying their own world-extent bounding sphere ------
+  // Why these tests matter: `InstancedMesh`/`SkinnedMesh` have a `geometry`
+  // whose bounding sphere only covers the *base* geometry, not the spread of
+  // instance matrices or the skinned/posed extent. Three.js gives these types
+  // an object-level `boundingSphere` (via `computeBoundingSphere()`) that does
+  // reflect the real extent. The helper must prefer that over the geometry
+  // sphere so instanced/skinned objects are gated by where they actually draw.
+  describe('Tier B: object-level boundingSphere (InstancedMesh / SkinnedMesh)', () => {
+    it('uses the instance-aware sphere, not the base geometry sphere', () => {
+      const camera = makeCamera();
+      const geom = new THREE.SphereGeometry(1, 8, 8);
+      const inst = new THREE.InstancedMesh(
+        geom,
+        new THREE.MeshBasicMaterial(),
+        1
+      );
+      // Single instance translated far outside the FOV. The base geometry
+      // sphere is centred at the (origin) mesh position — which sits at the
+      // camera and would intersect the frustum — so a geometry-only check
+      // would wrongly report "visible". The instance-aware sphere is centred
+      // ~ (1000,0,-5) and must drive the result to false.
+      const m = new THREE.Matrix4().makeTranslation(1000, 0, -5);
+      inst.setMatrixAt(0, m);
+      inst.instanceMatrix.needsUpdate = true;
+      inst.computeBoundingSphere();
+      inst.updateMatrixWorld();
+      expect(isObjectInCameraFrustum(camera, inst)).toBe(false);
+    });
+
+    it('returns true for an InstancedMesh whose instances are in front', () => {
+      const camera = makeCamera();
+      const geom = new THREE.SphereGeometry(1, 8, 8);
+      const inst = new THREE.InstancedMesh(
+        geom,
+        new THREE.MeshBasicMaterial(),
+        1
+      );
+      inst.setMatrixAt(0, new THREE.Matrix4().makeTranslation(0, 0, -5));
+      inst.instanceMatrix.needsUpdate = true;
+      inst.computeBoundingSphere();
+      inst.updateMatrixWorld();
+      expect(isObjectInCameraFrustum(camera, inst)).toBe(true);
+    });
+
+    it('honours a pre-set object-level boundingSphere (e.g. a posed SkinnedMesh)', () => {
+      // A real SkinnedMesh needs a bound skeleton with skin attributes, which
+      // is fragile to set up deterministically. The contract we care about is
+      // that ANY object exposing a populated `boundingSphere` has it honoured
+      // (SkinnedMesh.computeBoundingSphere() produces exactly such a sphere).
+      // We simulate that by assigning the sphere directly.
+      const camera = makeCamera();
+      const obj = makeUnitSphereMesh() as THREE.Mesh & {
+        boundingSphere: THREE.Sphere;
+      };
+      // Geometry sphere (origin) would intersect; the posed sphere far to the
+      // side must win and cull.
+      obj.boundingSphere = new THREE.Sphere(new THREE.Vector3(1000, 0, -5), 1);
+      obj.updateMatrixWorld();
+      expect(isObjectInCameraFrustum(camera, obj)).toBe(false);
+    });
+  });
+
+  // --- Tier C: sprites ------------------------------------------------------
+  // Why this test matters: `Sprite` is a screen-space billboard with no
+  // meaningful world geometry (its internal quad geometry is tiny and not
+  // representative of its rendered size). The right notion of "visible" for a
+  // sprite is whether its world-space origin is inside the frustum, so we test
+  // that as a point rather than via the quad's bounding sphere.
+  describe('Tier C: sprites', () => {
+    it('returns true for a sprite positioned in front of the camera', () => {
+      const camera = makeCamera();
+      const sprite = new THREE.Sprite(new THREE.SpriteMaterial());
+      sprite.position.set(0, 0, -5);
+      sprite.updateMatrixWorld();
+      expect(isObjectInCameraFrustum(camera, sprite)).toBe(true);
+    });
+
+    it('returns false for a sprite behind the camera', () => {
+      const camera = makeCamera();
+      const sprite = new THREE.Sprite(new THREE.SpriteMaterial());
+      sprite.position.set(0, 0, 10);
+      sprite.updateMatrixWorld();
+      expect(isObjectInCameraFrustum(camera, sprite)).toBe(false);
+    });
+
+    it('returns false for a sprite far outside the FOV', () => {
+      const camera = makeCamera();
+      const sprite = new THREE.Sprite(new THREE.SpriteMaterial());
+      sprite.position.set(1000, 0, -5);
+      sprite.updateMatrixWorld();
+      expect(isObjectInCameraFrustum(camera, sprite)).toBe(false);
+    });
+  });
 });
