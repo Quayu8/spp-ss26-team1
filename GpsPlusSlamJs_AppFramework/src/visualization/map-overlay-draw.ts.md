@@ -19,7 +19,7 @@ renderers cannot diverge again.
   2. fused SLAM+GPS polyline;
   3. alignment-snapshot polyline;
   4. optional user-position marker (`options.showUserPosition`).
-  Returns `{ layers, bounds }`.
+     Returns `{ layers, bounds }`.
 - `DrawMapDataOptions` — `{ showUserPosition?: boolean }` (default off).
 - `DrawnMapData` — `{ layers: L.Layer[]; bounds: L.LatLngBounds }`.
 - Color constants: `RAW_GPS_COLOR`, `FUSED_PATH_COLOR`,

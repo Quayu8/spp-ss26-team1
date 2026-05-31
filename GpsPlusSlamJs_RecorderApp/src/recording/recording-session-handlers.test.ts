@@ -17,6 +17,7 @@ import {
   type RecordingOptions,
 } from 'gps-plus-slam-app-framework/state/recording-options';
 import type { StoreSubscriberDeps } from 'gps-plus-slam-app-framework/state/store-subscribers';
+import type { MapData } from 'gps-plus-slam-app-framework/visualization/map-data';
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -508,9 +509,7 @@ describe('handleStartRecording', () => {
     // getMapOverlay() on each invocation ensures late-created overlays work.
     const mockOverlay = {
       setGpsPosition: vi.fn(),
-      addRawGpsPoint: vi.fn(),
-      addFusedPoint: vi.fn(),
-      addAlignmentSnapshot: vi.fn(),
+      render: vi.fn<(data: MapData) => void>(),
       addCurrentMarker: vi.fn(),
     };
     // getMapOverlay returns null initially
@@ -531,11 +530,16 @@ describe('handleStartRecording', () => {
     expect(mapProxy).not.toBeNull();
     expect(mapProxy).toBeDefined();
 
+    const sampleMapData: MapData = {
+      userPosition: { lat: 50, lng: 8 },
+      rawGpsPath: [{ lat: 50, lng: 8 }],
+      fusedPath: [],
+      alignmentSnapshots: [],
+    };
+
     // Calling proxy methods when overlay is null should be safe (no-op)
     expect(() => mapProxy.setGpsPosition(50, 8)).not.toThrow();
-    expect(() => mapProxy.addRawGpsPoint(50, 8)).not.toThrow();
-    expect(() => mapProxy.addFusedPoint(50, 8)).not.toThrow();
-    expect(() => mapProxy.addAlignmentSnapshot(50, 8)).not.toThrow();
+    expect(() => mapProxy.render(sampleMapData)).not.toThrow();
     expect(() => mapProxy.addCurrentMarker(50, 8, 'RP1')).not.toThrow();
 
     // Now simulate the overlay being created (user tapped map button)
@@ -545,14 +549,8 @@ describe('handleStartRecording', () => {
     mapProxy.setGpsPosition(51, 9);
     expect(mockOverlay.setGpsPosition).toHaveBeenCalledWith(51, 9);
 
-    mapProxy.addRawGpsPoint(51.1, 9.1);
-    expect(mockOverlay.addRawGpsPoint).toHaveBeenCalledWith(51.1, 9.1);
-
-    mapProxy.addFusedPoint(51.2, 9.2);
-    expect(mockOverlay.addFusedPoint).toHaveBeenCalledWith(51.2, 9.2);
-
-    mapProxy.addAlignmentSnapshot(51.3, 9.3);
-    expect(mockOverlay.addAlignmentSnapshot).toHaveBeenCalledWith(51.3, 9.3);
+    mapProxy.render(sampleMapData);
+    expect(mockOverlay.render).toHaveBeenCalledWith(sampleMapData);
 
     mapProxy.addCurrentMarker(51.4, 9.4, 'RP2');
     expect(mockOverlay.addCurrentMarker).toHaveBeenCalledWith(51.4, 9.4, 'RP2');

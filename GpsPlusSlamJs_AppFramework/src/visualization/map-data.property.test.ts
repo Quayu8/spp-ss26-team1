@@ -16,7 +16,7 @@ import * as fc from 'fast-check';
 import * as THREE from 'three';
 import { buildMapData } from './map-data';
 import { computeFusedPath } from '../utils/fused-path';
-import type { Matrix4, Vector3 } from 'gps-plus-slam-js';
+import type { Vector3 } from 'gps-plus-slam-js';
 
 const arbUnit = fc.double({ min: -1, max: 1, noNaN: true });
 const arbAngle = fc.double({ min: -Math.PI, max: Math.PI, noNaN: true });
@@ -43,7 +43,7 @@ const arbRigidAlignment = fc
       quat,
       new THREE.Vector3(1, 1, 1)
     );
-    return m.toArray() as unknown as Matrix4;
+    return m.toArray();
   });
 
 const arbOdom = fc.array(

@@ -9,12 +9,13 @@
  * CSS3DObject and positioned as a child of the camera or CameraFollower.
  * A CSS3DRenderer (managed externally) composites it with the WebGL scene.
  *
- * Live overlays:
- * - User position: blue pulsing dot at current GPS location
- * - Raw GPS path: yellow polyline (same color as 3D GPS spheres)
- * - Fused path: cyan polyline (same color as 3D fused spheres)
- * - Alignment snapshots: red polyline connecting snapshot positions
- * - Reference points: colored circle markers with label popups
+ * Trajectory layers (raw GPS path + accuracy circles, fused path, alignment
+ * snapshots, user position) are drawn from a single resolved `MapData`
+ * snapshot via the shared `drawMapData` routine (Phase 3 unification — the
+ * same routine the 2D session-summary map uses), passed in through
+ * {@link LeafletMapOverlay.render}. Reference-point markers are app-defined
+ * and driven separately through the generic named-marker API
+ * (`addCurrentMarker` / `addPriorMarker` / `clearPriorMarkers`).
  *
  * ARCHITECTURE:
  * - CSS3DObject is a child of mapParent (CameraFollower or camera)
@@ -29,6 +30,8 @@ import { CSS3DObject } from 'three/addons/renderers/CSS3DRenderer.js';
 import L from 'leaflet';
 import type { LatLong } from 'gps-plus-slam-js';
 import { VIS_COLORS } from './vis-colors';
+import type { MapData } from './map-data';
+import { drawMapData } from './map-overlay-draw';
 import { createLogger } from '../utils/logger';
 
 const log = createLogger('LeafletMapOverlay');
@@ -118,10 +121,13 @@ export class LeafletMapOverlay {
   // CSS3D state
   private cssObject: CSS3DObject | null = null;
 
-  // Live overlay state (buffered — data can arrive before show())
-  private rawGpsPoints: L.LatLngExpression[] = [];
-  private fusedPoints: L.LatLngExpression[] = [];
-  private snapshotPoints: L.LatLngExpression[] = [];
+  // Latest trajectory snapshot (buffered — data can arrive before show()).
+  // Drawn via the shared `drawMapData` routine; replaced wholesale on each
+  // `render()` so the live fused path "snaps" as the alignment matrix improves.
+  private latestMapData: MapData | null = null;
+  // Leaflet layers created by the last `drawMapData` call, kept for cleanup.
+  private trajectoryLayers: L.Layer[] = [];
+
   // Generic named markers (e.g., recorder ref-point markers). Buffered so
   // entries added before `show()` are still rendered when the Leaflet map
   // is created. `isPrior` selects color + label decoration.
@@ -132,12 +138,6 @@ export class LeafletMapOverlay {
     isPrior: boolean;
     marker: L.Marker | null;
   }> = [];
-
-  // Leaflet overlay layers
-  private userMarker: L.Marker | null = null;
-  private rawGpsPolyline: L.Polyline | null = null;
-  private fusedPolyline: L.Polyline | null = null;
-  private snapshotPolyline: L.Polyline | null = null;
 
   constructor(
     scene: THREE.Scene,
@@ -166,7 +166,6 @@ export class LeafletMapOverlay {
 
     if (this.leafletMap) {
       this.leafletMap.setView([lat, lon], this.zoomLevel);
-      this.updateUserMarker();
     }
   }
 
@@ -217,48 +216,26 @@ export class LeafletMapOverlay {
   }
 
   // -------------------------------------------------------------------------
-  // Live overlay methods
+  // Trajectory rendering (full-snapshot)
   // -------------------------------------------------------------------------
 
-  addRawGpsPoint(lat: number, lon: number): void {
-    this.rawGpsPoints.push([lat, lon]);
+  /**
+   * Render a full trajectory snapshot.
+   *
+   * Replaces the previous incremental `addRawGpsPoint` / `addFusedPoint` /
+   * `addAlignmentSnapshot` API with a single full-snapshot path: the caller
+   * builds a {@link MapData} (via the shared `buildMapData`) from the latest
+   * store slices and hands it here. The trajectory layers are redrawn
+   * wholesale through the shared {@link drawMapData} routine, so the live map
+   * stays pixel-identical to the 2D session-summary map and the fused path
+   * recomputes (D2) as the alignment matrix improves.
+   *
+   * Buffered when the map is not yet shown; applied on `show()`.
+   */
+  render(data: MapData): void {
+    this.latestMapData = data;
     if (this.leafletMap) {
-      if (!this.rawGpsPolyline) {
-        this.rawGpsPolyline = L.polyline([], {
-          color: VIS_COLORS.RAW_GPS.css,
-          weight: 3,
-          opacity: 0.8,
-        }).addTo(this.leafletMap);
-      }
-      this.rawGpsPolyline.addLatLng([lat, lon]);
-    }
-  }
-
-  addFusedPoint(lat: number, lon: number): void {
-    this.fusedPoints.push([lat, lon]);
-    if (this.leafletMap) {
-      if (!this.fusedPolyline) {
-        this.fusedPolyline = L.polyline([], {
-          color: VIS_COLORS.FUSED_VIO.css,
-          weight: 3,
-          opacity: 0.8,
-        }).addTo(this.leafletMap);
-      }
-      this.fusedPolyline.addLatLng([lat, lon]);
-    }
-  }
-
-  addAlignmentSnapshot(lat: number, lon: number): void {
-    this.snapshotPoints.push([lat, lon]);
-    if (this.leafletMap) {
-      if (!this.snapshotPolyline) {
-        this.snapshotPolyline = L.polyline([], {
-          color: VIS_COLORS.ALIGNMENT_SNAPSHOT.css,
-          weight: 3,
-          opacity: 0.8,
-        }).addTo(this.leafletMap);
-      }
-      this.snapshotPolyline.addLatLng([lat, lon]);
+      this.drawTrajectory();
     }
   }
 
@@ -366,9 +343,8 @@ export class LeafletMapOverlay {
     this.destroyLeafletMap();
 
     // Clear buffered data
-    this.rawGpsPoints = [];
-    this.fusedPoints = [];
-    this.snapshotPoints = [];
+    this.latestMapData = null;
+    this.trajectoryLayers = [];
     this.namedMarkers = [];
 
     this.cssObject = null;
@@ -421,14 +397,10 @@ export class LeafletMapOverlay {
 
   private destroyLeafletMap(): void {
     // Remove all overlay layers
-    this.userMarker?.remove();
-    this.userMarker = null;
-    this.rawGpsPolyline?.remove();
-    this.rawGpsPolyline = null;
-    this.fusedPolyline?.remove();
-    this.fusedPolyline = null;
-    this.snapshotPolyline?.remove();
-    this.snapshotPolyline = null;
+    for (const layer of this.trajectoryLayers) {
+      layer.remove();
+    }
+    this.trajectoryLayers = [];
     for (const m of this.namedMarkers) {
       m.marker?.remove();
       m.marker = null;
@@ -504,35 +476,8 @@ export class LeafletMapOverlay {
       return;
     }
 
-    // User position
-    this.updateUserMarker();
-
-    // Raw GPS polyline
-    if (this.rawGpsPoints.length > 0) {
-      this.rawGpsPolyline = L.polyline(this.rawGpsPoints, {
-        color: VIS_COLORS.RAW_GPS.css,
-        weight: 3,
-        opacity: 0.8,
-      }).addTo(this.leafletMap);
-    }
-
-    // Fused polyline
-    if (this.fusedPoints.length > 0) {
-      this.fusedPolyline = L.polyline(this.fusedPoints, {
-        color: VIS_COLORS.FUSED_VIO.css,
-        weight: 3,
-        opacity: 0.8,
-      }).addTo(this.leafletMap);
-    }
-
-    // Alignment snapshot polyline
-    if (this.snapshotPoints.length > 0) {
-      this.snapshotPolyline = L.polyline(this.snapshotPoints, {
-        color: VIS_COLORS.ALIGNMENT_SNAPSHOT.css,
-        weight: 3,
-        opacity: 0.8,
-      }).addTo(this.leafletMap);
-    }
+    // Trajectory layers (raw GPS + circles, fused, snapshots, user position).
+    this.drawTrajectory();
 
     // Named markers — only create markers for entries that don't have one
     for (const m of this.namedMarkers) {
@@ -542,23 +487,20 @@ export class LeafletMapOverlay {
     }
   }
 
-  private updateUserMarker(): void {
-    if (!this.gpsPosition || !this.leafletMap) {
+  /**
+   * Redraw the trajectory layers from {@link latestMapData} via the shared
+   * {@link drawMapData} routine, removing any layers from the previous draw.
+   */
+  private drawTrajectory(): void {
+    if (!this.leafletMap || !this.latestMapData) {
       return;
     }
-
-    if (this.userMarker) {
-      this.userMarker.setLatLng([this.gpsPosition.lat, this.gpsPosition.lon]);
-    } else {
-      this.userMarker = L.marker([this.gpsPosition.lat, this.gpsPosition.lon], {
-        icon: L.divIcon({
-          className: '',
-          html: `<div style="background:${VIS_COLORS.USER_POSITION.css};width:14px;height:14px;border-radius:50%;border:3px solid white;box-shadow:0 0 6px rgba(59,130,246,0.6);"></div>`,
-          iconSize: [14, 14],
-          iconAnchor: [7, 7],
-        }),
-      }).addTo(this.leafletMap);
+    for (const layer of this.trajectoryLayers) {
+      layer.remove();
     }
+    this.trajectoryLayers = drawMapData(this.leafletMap, this.latestMapData, {
+      showUserPosition: true,
+    }).layers;
   }
 
   private createNamedMarker(

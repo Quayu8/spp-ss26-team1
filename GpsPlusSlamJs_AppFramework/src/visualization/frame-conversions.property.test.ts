@@ -64,22 +64,13 @@ describe('nueToArLocal — properties', () => {
 
   it('preserves pairwise distances (rigid ⇒ inverse is rigid)', () => {
     fc.assert(
-      fc.property(
-        arbRigidAlignment,
-        arbPoint,
-        arbPoint,
-        (alignment, p, q) => {
-          const lp = nueToArLocal(alignment, p);
-          const lq = nueToArLocal(alignment, q);
-          const worldDist = Math.hypot(
-            p[0] - q[0],
-            p[1] - q[1],
-            p[2] - q[2]
-          );
-          // Relative tolerance scaled by the magnitude of the distance.
-          expect(lp.distanceTo(lq)).toBeCloseTo(worldDist, 4);
-        }
-      )
+      fc.property(arbRigidAlignment, arbPoint, arbPoint, (alignment, p, q) => {
+        const lp = nueToArLocal(alignment, p);
+        const lq = nueToArLocal(alignment, q);
+        const worldDist = Math.hypot(p[0] - q[0], p[1] - q[1], p[2] - q[2]);
+        // Relative tolerance scaled by the magnitude of the distance.
+        expect(lp.distanceTo(lq)).toBeCloseTo(worldDist, 4);
+      })
     );
   });
 });

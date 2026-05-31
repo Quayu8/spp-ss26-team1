@@ -67,11 +67,7 @@ export {
 export { DEFAULT_LERP_RATE, clampedAlpha } from './lerp-utils.js';
 
 // --- map-data (shared trajectory model) ---
-export {
-  type MapData,
-  type MapDataInput,
-  buildMapData,
-} from './map-data.js';
+export { type MapData, type MapDataInput, buildMapData } from './map-data.js';
 
 // --- accuracy-circles (shared per-event GPS accuracy circles) ---
 export {
@@ -95,7 +91,7 @@ export {
   drawMapData,
 } from './map-overlay-draw.js';
 
-// --- map-overlay --- 
+// --- map-overlay ---
 export {
   DEFAULT_ZOOM,
   DEFAULT_MAP_SIZE,

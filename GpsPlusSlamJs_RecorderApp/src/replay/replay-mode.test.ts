@@ -107,6 +107,7 @@ vi.mock('../visualization/wire-frame-tile-subscribers', () => ({
 import { startReplayMode } from './replay-mode.js';
 import { loadRecording } from '../storage/recording-loader';
 import { wireStoreSubscribers } from 'gps-plus-slam-app-framework/state/store-subscribers';
+import type { MapData } from 'gps-plus-slam-app-framework/visualization/map-data';
 import { createRecorderStore } from '../state/recorder-store';
 import {
   initReplayScene,
@@ -337,18 +338,16 @@ describe('replay-mode', () => {
     expect(mockOverlay.setGpsPosition).not.toHaveBeenCalled();
   });
 
-  it('setMapOverlay proxy forwards addFusedPoint, addAlignmentSnapshot, and addCurrentMarker', async () => {
-    // Why (Phase 1b): The map overlay proxy must forward all new overlay
-    // methods so the store subscriber can push fused path, alignment
-    // snapshots, and reference points to the Leaflet map in replay mode.
+  it('setMapOverlay proxy forwards render and addCurrentMarker', async () => {
+    // Why (Phase 3): The map overlay proxy must forward render (the unified
+    // MapData snapshot) and addCurrentMarker so the store subscriber can push
+    // the trajectory and reference points to the Leaflet map in replay mode.
     const config = makeConfig();
     const controller = await startReplayMode(fakeZipData, config);
 
     const mockOverlay = {
       setGpsPosition: vi.fn(),
-      addRawGpsPoint: vi.fn(),
-      addFusedPoint: vi.fn(),
-      addAlignmentSnapshot: vi.fn(),
+      render: vi.fn<(data: MapData) => void>(),
       addCurrentMarker: vi.fn(),
     };
     controller.setMapOverlay(mockOverlay);
@@ -358,11 +357,15 @@ describe('replay-mode', () => {
       addCurrentMarker: (lat: number, lon: number, name: string) => void;
     };
 
-    mapProxy.addFusedPoint!(50.1, 8.1);
-    expect(mockOverlay.addFusedPoint).toHaveBeenCalledWith(50.1, 8.1);
+    const sampleMapData: MapData = {
+      userPosition: { lat: 50.1, lng: 8.1 },
+      rawGpsPath: [{ lat: 50.1, lng: 8.1 }],
+      fusedPath: [],
+      alignmentSnapshots: [],
+    };
 
-    mapProxy.addAlignmentSnapshot!(50.2, 8.2);
-    expect(mockOverlay.addAlignmentSnapshot).toHaveBeenCalledWith(50.2, 8.2);
+    mapProxy.render!(sampleMapData);
+    expect(mockOverlay.render).toHaveBeenCalledWith(sampleMapData);
 
     mapProxy.addCurrentMarker(50.3, 8.3, 'bench');
     expect(mockOverlay.addCurrentMarker).toHaveBeenCalledWith(

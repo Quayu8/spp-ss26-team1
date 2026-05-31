@@ -22,6 +22,7 @@ import {
   type StoreSubscriberDeps,
   type SubscribableStore,
 } from './store-subscribers';
+import type { MapData } from '../visualization/map-data';
 
 // ---------------------------------------------------------------------------
 // Helpers — minimal mock factories
@@ -97,7 +98,7 @@ function makeMockDeps() {
     },
     mapOverlay: {
       setGpsPosition: vi.fn<(lat: number, lon: number) => void>(),
-      addRawGpsPoint: vi.fn<(lat: number, lon: number) => void>(),
+      render: vi.fn<(data: MapData) => void>(),
     },
   } satisfies StoreSubscriberDeps;
 }
@@ -646,10 +647,11 @@ describe('wireStoreSubscribers', () => {
     expect(deps.mapOverlay.setGpsPosition).not.toHaveBeenCalled();
   });
 
-  it('calls addRawGpsPoint on mapOverlay for each new GPS event', () => {
-    // Why: The Leaflet map overlay (Approach E) needs raw GPS breadcrumbs
-    // to draw the GPS path polyline. Each new GPS event should feed its
-    // lat/lng to the map overlay.
+  it('renders raw GPS path on mapOverlay for new GPS events', () => {
+    // Why: The Leaflet map overlay needs the raw GPS breadcrumbs to draw the
+    // GPS path polyline. Each store change rebuilds the full MapData snapshot
+    // and hands it to render(), so the rendered rawGpsPath must contain every
+    // GPS event's lat/lng.
     const mock = makeMockStore(makeState());
     wireStoreSubscribers(mock.store, deps);
 
@@ -689,19 +691,24 @@ describe('wireStoreSubscribers', () => {
       })
     );
 
-    expect(deps.mapOverlay.addRawGpsPoint).toHaveBeenCalledTimes(2);
-    expect(deps.mapOverlay.addRawGpsPoint).toHaveBeenCalledWith(50.001, 8.001);
-    expect(deps.mapOverlay.addRawGpsPoint).toHaveBeenCalledWith(50.002, 8.002);
+    expect(deps.mapOverlay.render).toHaveBeenCalled();
+    const lastData = (
+      deps.mapOverlay.render as ReturnType<typeof vi.fn>
+    ).mock.calls.at(-1)![0] as MapData;
+    expect(lastData.rawGpsPath).toEqual([
+      { lat: 50.001, lng: 8.001, accuracy: undefined },
+      { lat: 50.002, lng: 8.002, accuracy: undefined },
+    ]);
   });
 
-  it('handles mapOverlay without addRawGpsPoint gracefully', () => {
+  it('handles mapOverlay without render gracefully', () => {
     // Why: Existing callers may pass a mapOverlay that only has setGpsPosition.
-    // The addRawGpsPoint call is optional-chained and must not throw.
+    // The render call is optional-chained and must not throw.
     const depsMinimal: StoreSubscriberDeps = {
       ...deps,
       mapOverlay: {
         setGpsPosition: vi.fn(),
-        // No addRawGpsPoint
+        // No render
       },
     };
 
@@ -1552,21 +1559,27 @@ describe('wireStoreSubscribers', () => {
   // Phase 1b: Map overlay — fused path, alignment snapshots, reference points
   // ---------------------------------------------------------------------------
 
-  describe('map overlay fused path (addFusedPoint)', () => {
+  describe('map overlay fused path (render)', () => {
     // Why these tests matter:
-    // The Leaflet map overlay (Approach E) shows a cyan fused path polyline.
-    // For each new GPS event, the subscriber must compute the fused GPS position
-    // (alignmentMatrix × odomPosition → calcGpsCoords) and feed it to the map.
+    // The Leaflet map overlay shows a cyan fused path polyline. On each store
+    // change the subscriber rebuilds the full MapData snapshot — whose fused
+    // path is recomputed from the latest alignment matrix (D2) — and hands it
+    // to render(). These tests assert the rendered fusedPath is correct.
 
-    it('calls addFusedPoint with fused GPS coordinates for each new event', () => {
+    function lastRenderData(d: StoreSubscriberDeps): MapData {
+      return (d.mapOverlay!.render as ReturnType<typeof vi.fn>).mock.calls.at(
+        -1
+      )![0] as MapData;
+    }
+
+    it('renders fused GPS coordinates for new events', () => {
       // Why: the fused path is the alignment-corrected trajectory and must
       // appear as a cyan polyline on the Leaflet map overlay.
       const depsWithFused: StoreSubscriberDeps = {
         ...deps,
         mapOverlay: {
           setGpsPosition: vi.fn(),
-          addRawGpsPoint: vi.fn(),
-          addFusedPoint: vi.fn(),
+          render: vi.fn<(data: MapData) => void>(),
         },
       };
 
@@ -1600,23 +1613,20 @@ describe('wireStoreSubscribers', () => {
         })
       );
 
-      expect(depsWithFused.mapOverlay!.addFusedPoint).toHaveBeenCalledTimes(1);
-      const [lat, lon] = (
-        depsWithFused.mapOverlay!.addFusedPoint as ReturnType<typeof vi.fn>
-      ).mock.calls[0];
+      const data = lastRenderData(depsWithFused);
+      expect(data.fusedPath).toHaveLength(1);
       // 10m north from lat 50 → lat ≈ 50 + 10/110989
-      expect(lat).toBeCloseTo(50 + 10 / 110989, 4);
-      expect(lon).toBeCloseTo(8, 4);
+      expect(data.fusedPath[0]!.lat).toBeCloseTo(50 + 10 / 110989, 4);
+      expect(data.fusedPath[0]!.lng).toBeCloseTo(8, 4);
     });
 
-    it('does not call addFusedPoint when alignment matrix is missing', () => {
+    it('renders an empty fused path when the alignment matrix is missing', () => {
       // Why: without alignment, the fused transform is undefined — skip.
       const depsWithFused: StoreSubscriberDeps = {
         ...deps,
         mapOverlay: {
           setGpsPosition: vi.fn(),
-          addRawGpsPoint: vi.fn(),
-          addFusedPoint: vi.fn(),
+          render: vi.fn<(data: MapData) => void>(),
         },
       };
 
@@ -1647,17 +1657,17 @@ describe('wireStoreSubscribers', () => {
         })
       );
 
-      expect(depsWithFused.mapOverlay!.addFusedPoint).not.toHaveBeenCalled();
+      const data = lastRenderData(depsWithFused);
+      expect(data.fusedPath).toEqual([]);
     });
 
-    it('does not call addFusedPoint when zeroRef is missing', () => {
+    it('renders an empty fused path when zeroRef is missing', () => {
       // Why: without the GPS origin, NUE→GPS conversion is impossible.
       const depsWithFused: StoreSubscriberDeps = {
         ...deps,
         mapOverlay: {
           setGpsPosition: vi.fn(),
-          addRawGpsPoint: vi.fn(),
-          addFusedPoint: vi.fn(),
+          render: vi.fn<(data: MapData) => void>(),
         },
       };
 
@@ -1688,13 +1698,18 @@ describe('wireStoreSubscribers', () => {
         })
       );
 
-      expect(depsWithFused.mapOverlay!.addFusedPoint).not.toHaveBeenCalled();
+      const data = lastRenderData(depsWithFused);
+      expect(data.fusedPath).toEqual([]);
     });
 
-    it('handles mapOverlay without addFusedPoint gracefully', () => {
-      // Why: existing callers may not provide addFusedPoint — must not crash.
+    it('handles mapOverlay without render gracefully', () => {
+      // Why: existing callers may not provide render — must not crash.
+      const depsNoRender: StoreSubscriberDeps = {
+        ...deps,
+        mapOverlay: { setGpsPosition: vi.fn() },
+      };
       const mock = makeMockStore(makeState());
-      wireStoreSubscribers(mock.store, deps); // deps.mapOverlay has no addFusedPoint
+      wireStoreSubscribers(mock.store, depsNoRender);
 
       expect(() => {
         mock.setState(
@@ -1764,14 +1779,14 @@ describe('wireStoreSubscribers', () => {
       });
     }
 
-    it('calls mapOverlay.addAlignmentSnapshot with GPS coords when alignment changes', () => {
-      // Why: the 2D map needs a red marker at each alignment snapshot position.
+    it('renders alignment snapshot GPS coords when alignment changes', () => {
+      // Why: the 2D map needs a red snapshot polyline; the snapshot GPS coords
+      // are accumulated and passed through render() in MapData.alignmentSnapshots.
       const depsWithSnapshot: StoreSubscriberDeps = {
         ...deps,
         mapOverlay: {
           setGpsPosition: vi.fn(),
-          addRawGpsPoint: vi.fn(),
-          addAlignmentSnapshot: vi.fn(),
+          render: vi.fn<(data: MapData) => void>(),
         },
       };
 
@@ -1796,26 +1811,23 @@ describe('wireStoreSubscribers', () => {
         })
       );
 
-      expect(
-        depsWithSnapshot.mapOverlay!.addAlignmentSnapshot
-      ).toHaveBeenCalledTimes(1);
-      const [lat, lon] = (
-        depsWithSnapshot.mapOverlay!.addAlignmentSnapshot as ReturnType<
-          typeof vi.fn
-        >
-      ).mock.calls[0];
-      expect(lat).toBeCloseTo(50 + 10 / 110989, 4);
-      expect(lon).toBeCloseTo(8, 4);
+      const renderMock = depsWithSnapshot.mapOverlay!.render as ReturnType<
+        typeof vi.fn
+      >;
+      expect(renderMock).toHaveBeenCalled();
+      const data = renderMock.mock.calls.at(-1)![0] as MapData;
+      expect(data.alignmentSnapshots).toHaveLength(1);
+      expect(data.alignmentSnapshots[0]!.lat).toBeCloseTo(50 + 10 / 110989, 4);
+      expect(data.alignmentSnapshots[0]!.lng).toBeCloseTo(8, 4);
     });
 
-    it('does not call mapOverlay.addAlignmentSnapshot when zeroRef is missing', () => {
+    it('renders no alignment snapshots when zeroRef is missing', () => {
       // Why: without GPS origin, NUE→GPS conversion is impossible.
       const depsWithSnapshot: StoreSubscriberDeps = {
         ...deps,
         mapOverlay: {
           setGpsPosition: vi.fn(),
-          addRawGpsPoint: vi.fn(),
-          addAlignmentSnapshot: vi.fn(),
+          render: vi.fn<(data: MapData) => void>(),
         },
       };
 
@@ -1859,15 +1871,21 @@ describe('wireStoreSubscribers', () => {
         })
       );
 
-      expect(
-        depsWithSnapshot.mapOverlay!.addAlignmentSnapshot
-      ).not.toHaveBeenCalled();
+      const renderMock = depsWithSnapshot.mapOverlay!.render as ReturnType<
+        typeof vi.fn
+      >;
+      const lastData = renderMock.mock.calls.at(-1)?.[0] as MapData | undefined;
+      expect(lastData?.alignmentSnapshots ?? []).toEqual([]);
     });
 
-    it('handles mapOverlay without addAlignmentSnapshot gracefully', () => {
-      // Why: existing callers may not provide addAlignmentSnapshot — must not crash.
+    it('handles mapOverlay without render gracefully', () => {
+      // Why: existing callers may not provide render — must not crash.
+      const depsNoRender: StoreSubscriberDeps = {
+        ...deps,
+        mapOverlay: { setGpsPosition: vi.fn() },
+      };
       const mock = makeMockStore(makeGpsState());
-      wireStoreSubscribers(mock.store, deps);
+      wireStoreSubscribers(mock.store, depsNoRender);
 
       expect(() => {
         mock.setState(

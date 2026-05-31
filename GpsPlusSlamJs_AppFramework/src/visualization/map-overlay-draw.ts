@@ -156,10 +156,9 @@ export function drawMapData(
       iconSize: [18, 18],
       iconAnchor: [9, 9],
     });
-    const marker = L.marker(
-      [data.userPosition.lat, data.userPosition.lng],
-      { icon }
-    ).addTo(map);
+    const marker = L.marker([data.userPosition.lat, data.userPosition.lng], {
+      icon,
+    }).addTo(map);
     layers.push(marker);
 
     bounds.extend([data.userPosition.lat, data.userPosition.lng]);

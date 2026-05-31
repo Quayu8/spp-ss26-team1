@@ -90,6 +90,7 @@ import { createLogger } from 'gps-plus-slam-app-framework/utils/logger';
 import type { LatLong, Matrix4 } from 'gps-plus-slam-app-framework/core';
 import { calcGpsCoords } from 'gps-plus-slam-app-framework/core';
 import type { LeafletMapOverlay } from 'gps-plus-slam-app-framework/visualization/leaflet-map-overlay';
+import type { MapData } from 'gps-plus-slam-app-framework/visualization/map-data';
 import { getBuildInfo } from '../utils/build-info';
 import { DEFAULT_SCENARIO } from '../ui/session-browser';
 
@@ -309,14 +310,8 @@ export function createRecordingSessionHandlers(
       setGpsPosition(lat: number, lon: number): void {
         deps.getMapOverlay()?.setGpsPosition(lat, lon);
       },
-      addRawGpsPoint(lat: number, lon: number): void {
-        deps.getMapOverlay()?.addRawGpsPoint(lat, lon);
-      },
-      addFusedPoint(lat: number, lon: number): void {
-        deps.getMapOverlay()?.addFusedPoint(lat, lon);
-      },
-      addAlignmentSnapshot(lat: number, lon: number): void {
-        deps.getMapOverlay()?.addAlignmentSnapshot(lat, lon);
+      render(data: MapData): void {
+        deps.getMapOverlay()?.render(data);
       },
       addCurrentMarker(lat: number, lon: number, name: string): void {
         deps.getMapOverlay()?.addCurrentMarker(lat, lon, name);

@@ -104,9 +104,7 @@ describe('nueToArLocal', () => {
     // A 90° rotation about +Y maps AR-local +X → world +? Verifies the
     // helper applies the *inverse* rotation. For R = rotY(90°), R·(1,0,0) =
     // (0,0,-1); so the world point (0,0,-1) must map back to local (1,0,0).
-    const rotY90 = new THREE.Matrix4()
-      .makeRotationY(Math.PI / 2)
-      .toArray();
+    const rotY90 = new THREE.Matrix4().makeRotationY(Math.PI / 2).toArray();
     const worldPoint: [number, number, number] = [0, 0, -1];
     const local = nueToArLocal(rotY90, worldPoint);
     expect(local.x).toBeCloseTo(1, 9);

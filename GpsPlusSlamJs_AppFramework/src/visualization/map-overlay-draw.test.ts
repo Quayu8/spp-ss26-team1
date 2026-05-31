@@ -47,7 +47,10 @@ let divIconCalls: DivIconCall[] = [];
 let boundsExtends: unknown[] = [];
 
 vi.mock('leaflet', () => {
-  const makeLayer = () => ({ addTo: vi.fn().mockReturnThis(), remove: vi.fn() });
+  const makeLayer = () => ({
+    addTo: vi.fn().mockReturnThis(),
+    remove: vi.fn(),
+  });
   return {
     default: {
       polyline: vi.fn((latLngs: unknown, options: Record<string, unknown>) => {
@@ -83,7 +86,13 @@ vi.mock('leaflet', () => {
   };
 });
 
-import { drawMapData, RAW_GPS_COLOR, FUSED_PATH_COLOR, ALIGNMENT_SNAPSHOT_COLOR, USER_POSITION_COLOR } from './map-overlay-draw';
+import {
+  drawMapData,
+  RAW_GPS_COLOR,
+  FUSED_PATH_COLOR,
+  ALIGNMENT_SNAPSHOT_COLOR,
+  USER_POSITION_COLOR,
+} from './map-overlay-draw';
 
 const mapStub = {} as L.Map;
 
@@ -221,15 +230,15 @@ describe('drawMapData', () => {
   });
 
   it('draws a user marker when showUserPosition is set and a position exists', () => {
-    drawMapData(
-      mapStub,
-      emptyMapData({ userPosition: { lat: 9, lng: 10 } }),
-      { showUserPosition: true }
-    );
+    drawMapData(mapStub, emptyMapData({ userPosition: { lat: 9, lng: 10 } }), {
+      showUserPosition: true,
+    });
 
     expect(markerCalls).toHaveLength(1);
     expect(markerCalls[0]!.latLng).toEqual([9, 10]);
-    expect(String(divIconCalls[0]!.options.html)).toContain(USER_POSITION_COLOR);
+    expect(String(divIconCalls[0]!.options.html)).toContain(
+      USER_POSITION_COLOR
+    );
   });
 
   it('skips empty slices without creating layers', () => {

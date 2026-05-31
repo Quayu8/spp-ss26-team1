@@ -31,6 +31,7 @@ import {
   getAlignmentLerper,
 } from 'gps-plus-slam-app-framework/ar/replay-scene';
 import { wireStoreSubscribers } from 'gps-plus-slam-app-framework/state/store-subscribers';
+import type { MapData } from 'gps-plus-slam-app-framework/visualization/map-data';
 import { wireRefPointSubscribers } from '../state/ref-point-subscribers';
 import { gpsEventVisualizer } from 'gps-plus-slam-app-framework/visualization/gps-event-markers';
 import { refPointVisualizer } from '../visualization/ref-point-visualizer';
@@ -72,9 +73,7 @@ interface ReplayModeConfig {
  */
 interface ReplayMapOverlay {
   setGpsPosition: (lat: number, lon: number) => void;
-  addRawGpsPoint?: (lat: number, lon: number) => void;
-  addFusedPoint?: (lat: number, lon: number) => void;
-  addAlignmentSnapshot?: (lat: number, lon: number) => void;
+  render?: (data: MapData) => void;
   addCurrentMarker?: (lat: number, lon: number, name: string) => void;
 }
 
@@ -174,14 +173,8 @@ export async function startReplayMode(
     setGpsPosition(lat: number, lon: number): void {
       mapOverlayTarget?.setGpsPosition(lat, lon);
     },
-    addRawGpsPoint(lat: number, lon: number): void {
-      mapOverlayTarget?.addRawGpsPoint?.(lat, lon);
-    },
-    addFusedPoint(lat: number, lon: number): void {
-      mapOverlayTarget?.addFusedPoint?.(lat, lon);
-    },
-    addAlignmentSnapshot(lat: number, lon: number): void {
-      mapOverlayTarget?.addAlignmentSnapshot?.(lat, lon);
+    render(data: MapData): void {
+      mapOverlayTarget?.render?.(data);
     },
     addCurrentMarker(lat: number, lon: number, name: string): void {
       mapOverlayTarget?.addCurrentMarker?.(lat, lon, name);
