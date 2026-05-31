@@ -3,10 +3,7 @@
  * compact, user-facing "what should I do next?" instruction for first-time
  * AR+GPS users.
  *
- * Motivation & decisions: see
- * `gps-plus-slam/GpsPlusSlamJs_Docs/docs/2026-05-31-student-onboarding-anchor-example-user-feedback.md`
- * (Finding 3 + decision D3 → option C2). The recorder HUD
- * ({@link https} `updateTrackingQuality` in the recorder's `hud.ts`) is an
+ * The recorder HUD ({@link https} `updateTrackingQuality` in the recorder's `hud.ts`) is an
  * expert diagnostics panel; this seam is its onboarding-flavoured sibling
  * that coaches a user to *move around until alignment is good enough*.
  *

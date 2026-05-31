@@ -184,9 +184,6 @@ export {
   type AlignmentSnapshot,
 } from './tracking-quality.js';
 
-// --- onboarding-guidance (reusable coaching seam over tracking-quality;
-//     see docs/2026-05-31-student-onboarding-anchor-example-user-feedback.md
-//     decision D3 → C2) ---
 export {
   computeOnboardingGuidance,
   selectOnboardingGuidance,

@@ -2,7 +2,7 @@
  * Tests for the anchor marker extension seam.
  *
  * Why this matters: `createAnchorMarker` is the single "your content here"
- * boundary a student edits. The only contract the framework wiring relies
+ * boundary a new developer edits. The only contract the framework wiring relies
  * on is "returns one Three.js Object3D"; this test pins that contract so a
  * refactor that accidentally returns undefined/null is caught.
  */

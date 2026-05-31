@@ -7,10 +7,6 @@ reload — the payoff of the starter example's umbrella user story. Decision
 D2 (option B1) keeps this inline in the example (no framework helper) so the
 whole save/load story is readable in one small file.
 
-See
-[2026-05-31-student-onboarding-anchor-example-user-feedback.md](../../../gps-plus-slam/GpsPlusSlamJs_Docs/docs/2026-05-31-student-onboarding-anchor-example-user-feedback.md)
-(decision D2).
-
 ## Public API
 
 - `STORAGE_KEY` — the `localStorage` key.

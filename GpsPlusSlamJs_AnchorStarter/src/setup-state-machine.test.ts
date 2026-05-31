@@ -2,8 +2,7 @@
  * Unit tests for the setup state machine (setup-state-machine.ts).
  *
  * Why this test matters: this FSM is the *pedagogical core* of the starter
- * example (Finding 4 in
- * `gps-plus-slam/GpsPlusSlamJs_Docs/docs/2026-05-31-student-onboarding-anchor-example-user-feedback.md`).
+ * example.
  * It makes the "is there a cached anchor? no → place mode; yes → load and
  * show" branch explicit and self-explaining instead of inline `if`/flag
  * spaghetti. These tests pin both branches, the soft-gate placement rule

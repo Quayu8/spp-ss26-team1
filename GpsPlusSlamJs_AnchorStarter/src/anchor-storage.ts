@@ -2,13 +2,11 @@
  * Inline anchor persistence for the starter example.
  *
  * Decision D2 (option B1) keeps persistence *inline in the example* — no
- * framework surface is added — so a student can read the entire save/load
+ * framework surface is added — so a new developer can read the entire save/load
  * story in one small file and swap `localStorage` for their own backend by
  * editing one place. It mirrors the validate-and-clamp discipline of the
  * framework's `recording-options.ts` precedent.
  *
- * See
- * `gps-plus-slam/GpsPlusSlamJs_Docs/docs/2026-05-31-student-onboarding-anchor-example-user-feedback.md`.
  */
 
 import type { LatLong, LatLongAlt } from 'gps-plus-slam-app-framework/core';
@@ -19,7 +17,7 @@ export const STORAGE_KEY = 'gps-plus-slam-anchor-starter:anchor';
 /**
  * The minimal storage surface this module needs — a structural subset of the
  * DOM `Storage` interface. Injecting it keeps the module testable in Node
- * (no jsdom) and lets a student point it at any key/value store.
+ * (no jsdom) and lets a new developer point it at any key/value store.
  */
 export interface AnchorStore {
   getItem(key: string): string | null;

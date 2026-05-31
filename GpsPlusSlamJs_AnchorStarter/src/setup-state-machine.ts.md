@@ -3,9 +3,7 @@
 ## Purpose
 
 The pedagogical core of the starter example: an explicit, named, pure finite
-state machine for the first-user-experience, replacing inline `if`/flag glue
-(Finding 4 of
-[2026-05-31-student-onboarding-anchor-example-user-feedback.md](../../../gps-plus-slam/GpsPlusSlamJs_Docs/docs/2026-05-31-student-onboarding-anchor-example-user-feedback.md)).
+state machine for the first-user-experience, replacing inline `if`/flag glue.
 
 ## Public API
 

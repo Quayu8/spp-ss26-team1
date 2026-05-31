@@ -3,8 +3,7 @@
  * starter example.
  *
  * It encodes the sequential first-user-experience as an explicit, named,
- * pure finite state machine instead of inline `if`/flag glue (Finding 4 in
- * `gps-plus-slam/GpsPlusSlamJs_Docs/docs/2026-05-31-student-onboarding-anchor-example-user-feedback.md`).
+ * pure finite state machine instead of inline `if`/flag glue.
  *
  * Two branches, chosen at boot by "is there a cached anchor?":
  *

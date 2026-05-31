@@ -2,8 +2,7 @@
  * Persistent-anchor starter — application entry point (glue).
  *
  * This is the "framework wiring — don't touch" layer. It composes the
- * tested seams into the persistent-anchor flow described in
- * `gps-plus-slam/GpsPlusSlamJs_Docs/docs/2026-05-31-student-onboarding-anchor-example-user-feedback.md`:
+ * tested seams into the persistent-anchor flow:
  *
  *   1. Capability-gate (E1): no WebXR/GPS → honest message, no crash.
  *   2. On a user gesture, boot the store + AR session + GPS/orientation.
@@ -12,7 +11,7 @@
  *      cache-hit  → seed `createGpsAnchor` from the stored GPS and let it
  *                   re-converge, then reveal the marker.
  *
- * The ONE place a student edits to drop in their own use case is
+ * The ONE place a new developer edits to drop in their own use case is
  * `createAnchorMarker()` in `./marker.ts`. Everything here is plumbing.
  *
  * Pure, unit-tested logic lives in the sibling modules

@@ -1,6 +1,6 @@
 # `marker.ts` — the "your content here" extension seam
 
-- **Purpose:** The single boundary a student edits to drop in their own use
+- **Purpose:** The single boundary a new developer edits to drop in their own use
   case (Finding 6 of the planning doc). `main.ts` anchors whatever this
   returns to the persisted GPS coordinate.
 - **Public API:**

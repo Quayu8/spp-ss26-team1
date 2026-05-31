@@ -7,9 +7,6 @@
  *  - a round-trip preserves the coordinate (incl. optional altitude);
  *  - bad / empty / out-of-range JSON is treated as "no cached anchor"
  *    (the cache-miss branch), never a throw.
- * See
- * `gps-plus-slam/GpsPlusSlamJs_Docs/docs/2026-05-31-student-onboarding-anchor-example-user-feedback.md`
- * (decision D2 → option B1).
  */
 
 import { describe, it, expect } from 'vitest';

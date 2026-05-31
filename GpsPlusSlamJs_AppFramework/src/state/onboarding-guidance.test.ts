@@ -2,9 +2,7 @@
  * Unit tests for onboarding-guidance.ts.
  *
  * Why this test matters: `computeOnboardingGuidance` is the single reusable
- * framework seam introduced for the persistent-anchor starter example
- * (decision D3 → C2 in
- * `gps-plus-slam/GpsPlusSlamJs_Docs/docs/2026-05-31-student-onboarding-anchor-example-user-feedback.md`).
+ * framework seam introduced for the persistent-anchor starter example.
  * It must map *all four* tracking-quality states plus the `null`
  * "no report yet" case to a deterministic instruction, and `percentReady`
  * must be monotonic so a progress meter never moves backwards as alignment

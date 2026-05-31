@@ -7,10 +7,7 @@ compact, user-facing "what should I do next?" instruction for first-time
 AR+GPS users. It is the onboarding-flavoured sibling of the recorder's
 expert tracking-quality HUD.
 
-Motivation & decisions: see
-[2026-05-31-student-onboarding-anchor-example-user-feedback.md](../../../../gps-plus-slam/GpsPlusSlamJs_Docs/docs/2026-05-31-student-onboarding-anchor-example-user-feedback.md)
-(Finding 3, decision D3 → option C2). Companion of
-[tracking-quality.ts.md](./tracking-quality.ts.md) (the report producer).
+Companion of [tracking-quality.ts.md](./tracking-quality.ts.md) (the report producer).
 
 ## Public API
 

@@ -1,6 +1,6 @@
 /**
  * The single "your content here" extension seam (Finding 6 of the planning
- * doc). A student swaps the body of `createAnchorMarker()` for their own
+ * doc). A new developer swaps the body of `createAnchorMarker()` for their own
  * `THREE.Object3D` and the rest of the app keeps working unchanged: the
  * framework wiring in `main.ts` anchors *whatever* object this returns to
  * the persisted GPS coordinate.

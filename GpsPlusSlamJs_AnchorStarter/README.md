@@ -66,9 +66,6 @@ content (replace)**:
 
 ## Design decisions
 
-This app implements the decisions recorded in the planning doc
-[`2026-05-31-student-onboarding-anchor-example-user-feedback.md`](../../gps-plus-slam/GpsPlusSlamJs_Docs/docs/2026-05-31-student-onboarding-anchor-example-user-feedback.md):
-
 - **D2 — inline persistence:** `localStorage` lives in this app, not the
   framework (kept maximally copyable).
 - **D3 — reusable guidance seam:** the coaching metric uses the framework's

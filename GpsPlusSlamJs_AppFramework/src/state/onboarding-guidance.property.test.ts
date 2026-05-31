@@ -5,9 +5,7 @@
  * properties assert the invariants that must hold for *every* report —
  * `percentReady` is always in [0,1], guidance never throws, and the
  * cross-state ordering (warm-up ≤ degraded ≤ ready) holds for arbitrary
- * coverage/confidence inputs. This guards the monotonic-progress contract
- * the onboarding meter relies on (decision D3 / Finding 3 in
- * `gps-plus-slam/GpsPlusSlamJs_Docs/docs/2026-05-31-student-onboarding-anchor-example-user-feedback.md`).
+ * coverage/confidence inputs.
  */
 
 import { describe, it, expect } from 'vitest';
