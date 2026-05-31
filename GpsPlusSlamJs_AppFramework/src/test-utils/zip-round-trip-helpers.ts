@@ -53,6 +53,12 @@ export interface ProduceTestZipOptions {
   frameCount: number;
   deviceInfo: string;
   zeroPos: LatLong;
+  /**
+   * Optional horizontal accuracy (meters) stamped onto every produced
+   * `recordGpsEvent` action's `rawGpsPoint.latLongAccuracy`. When omitted,
+   * the field is left off — matching pre-accuracy recordings.
+   */
+  gpsAccuracy?: number;
 }
 
 /** Result of producing a test zip, with all metadata needed for assertions. */
@@ -181,6 +187,9 @@ export async function produceTestZip(
           latitude: options.zeroPos.lat + (i + 1) * 0.0001,
           longitude: options.zeroPos.lon + (i + 1) * 0.0001,
           timestamp: t,
+          ...(typeof options.gpsAccuracy === 'number'
+            ? { latLongAccuracy: options.gpsAccuracy }
+            : {}),
         },
       };
       await writeAndRecordAction({

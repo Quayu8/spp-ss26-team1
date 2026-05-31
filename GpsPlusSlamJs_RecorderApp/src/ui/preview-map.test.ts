@@ -24,6 +24,7 @@ let lastMapInstance: {
 };
 let polylineCalls: Array<{ latLngs: unknown; options: unknown }> = [];
 let tileLayerCalls: Array<{ url: unknown; options: unknown }> = [];
+let circleCalls: Array<{ latLng: unknown; options: unknown }> = [];
 
 // Mock Leaflet before importing the module under test
 vi.mock('leaflet', () => {
@@ -47,6 +48,13 @@ vi.mock('leaflet', () => {
       }),
       polyline: vi.fn((latLngs: unknown, options: unknown) => {
         polylineCalls.push({ latLngs, options });
+        return {
+          addTo: vi.fn().mockReturnThis(),
+          remove: vi.fn(),
+        };
+      }),
+      circle: vi.fn((latLng: unknown, options: unknown) => {
+        circleCalls.push({ latLng, options });
         return {
           addTo: vi.fn().mockReturnThis(),
           remove: vi.fn(),
@@ -93,6 +101,7 @@ describe('PreviewMap', () => {
     container = createTestContainer();
     polylineCalls = [];
     tileLayerCalls = [];
+    circleCalls = [];
     vi.clearAllMocks();
     vi.useFakeTimers();
   });
@@ -198,5 +207,52 @@ describe('PreviewMap', () => {
     expect(instance).not.toBeNull();
     expect(polylineCalls.length).toBe(1);
     expect(polylineCalls[0].latLngs).toEqual([[49.0, 7.0]]);
+  });
+
+  // --- Per-event accuracy circles ---
+
+  it('does not draw accuracy circles for points without an accuracy value', () => {
+    // Why: pre-accuracy recordings (and points where the browser omitted
+    // GeolocationCoordinates.accuracy) must remain renderable — only the
+    // polyline should appear.
+    createPreviewMap(container, SAMPLE_PATH);
+    expect(circleCalls.length).toBe(0);
+  });
+
+  it('draws one transparent yellow accuracy circle per point with accuracy', () => {
+    // Why: visualizing per-event horizontal accuracy is the whole point of
+    // this enhancement — without it, the polyline hides which fixes were
+    // accurate vs. noisy.
+    const path: GpsPathCoord[] = [
+      { lat: 50.0, lng: 8.0, accuracy: 5 },
+      { lat: 50.001, lng: 8.001, accuracy: 25 },
+    ];
+    createPreviewMap(container, path);
+
+    expect(circleCalls.length).toBe(2);
+    expect(circleCalls[0].latLng).toEqual([50.0, 8.0]);
+    expect(circleCalls[0].options).toMatchObject({
+      radius: 5,
+      color: '#ffff00',
+      fillColor: '#ffff00',
+    });
+    expect(circleCalls[1].options).toMatchObject({ radius: 25 });
+    // Fill must be transparent so overlapping circles remain legible.
+    const opts0 = circleCalls[0].options as { fillOpacity: number };
+    expect(opts0.fillOpacity).toBeLessThan(0.5);
+  });
+
+  it('skips accuracy circles for points with non-positive accuracy', () => {
+    // Why: 0 / negative / NaN accuracy values would either be invisible or
+    // crash Leaflet's circle radius math — guard them out.
+    const path: GpsPathCoord[] = [
+      { lat: 50.0, lng: 8.0, accuracy: 0 },
+      { lat: 50.001, lng: 8.001, accuracy: -3 },
+      { lat: 50.002, lng: 8.002, accuracy: Number.NaN },
+      { lat: 50.003, lng: 8.003, accuracy: 7 },
+    ];
+    createPreviewMap(container, path);
+    expect(circleCalls.length).toBe(1);
+    expect(circleCalls[0].options).toMatchObject({ radius: 7 });
   });
 });

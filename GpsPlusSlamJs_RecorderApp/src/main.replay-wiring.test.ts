@@ -77,6 +77,8 @@ vi.mock('./ui/hud', () => ({
   showSetupModal: vi.fn(),
   updateRefPointButtonLabel: vi.fn(),
   setNewRefPointButtonVisible: vi.fn(),
+  updateTrackingQuality: vi.fn(),
+  hideTrackingQuality: vi.fn(),
 }));
 vi.mock('./ui/toast', () => ({
   initToast: vi.fn(),
@@ -123,6 +125,7 @@ vi.mock('gps-plus-slam-app-framework/ar/webxr-session', () => ({
   setTrackingLostCallback: vi.fn(),
   setTrackingCallbacks: vi.fn(),
   setTrackingRecoveredCallback: vi.fn(),
+  setTrackingStore: vi.fn(),
   getScene: vi.fn(),
   getCamera: vi.fn(),
   getArWorldGroup: vi.fn(),
@@ -183,7 +186,6 @@ vi.mock('./state/recorder-store', () => ({
   }),
   startSession: vi.fn(),
   endSession: vi.fn(),
-  markReferencePoint: vi.fn(),
   add2dImage: vi.fn(),
   recordDepthSample: vi.fn(),
 }));
@@ -200,6 +202,7 @@ vi.mock('gps-plus-slam-app-framework/sensors/gps', () => ({
 vi.mock('gps-plus-slam-app-framework/sensors/permission-checker', () => ({
   checkAllPermissions: vi.fn(),
   requestAllPermissions: vi.fn(),
+  subscribePermissionChanges: vi.fn().mockReturnValue({ unsubscribe: vi.fn() }),
 }));
 vi.mock('gps-plus-slam-app-framework/state/gps-event-coordinator', () => ({
   createGpsPositionHandler: vi.fn(),
@@ -263,6 +266,9 @@ vi.mock('gps-plus-slam-app-framework/ar/capture-failure-tracker', () => ({
 }));
 vi.mock('gps-plus-slam-app-framework/utils/list-formatter', () => ({
   listFormatter: { format: vi.fn() },
+}));
+vi.mock('gps-plus-slam-app-framework', () => ({
+  selectTrackingQuality: vi.fn().mockReturnValue(null),
 }));
 
 // Import after all mocks are set up

@@ -33,6 +33,9 @@ export {
   DepthSampler,
 } from './depth-sampler.js';
 
+// --- frame-loop ---
+export { type FrameUpdate, registerFrameUpdate } from './frame-loop.js';
+
 // --- image-capture ---
 export {
   MIN_VALID_IMAGE_BYTES,
@@ -60,14 +63,6 @@ export {
 // --- scene-node-names ---
 export { SCENE_NODE } from './scene-node-names.js';
 
-// --- tracking-state ---
-export {
-  TrackingState,
-  type DeviceOrientation,
-  type TrackingStateCallbacks,
-  TrackingStateManager,
-} from './tracking-state.js';
-
 // --- webxr-session ---
 export {
   initAR,
@@ -78,6 +73,7 @@ export {
   getImageCaptureFrameCount,
   setTrackingCallbacks,
   setTrackingLostCallback,
+  setTrackingStore,
   setDepthCaptureCallback,
   startDepthCapture,
   stopDepthCapture,

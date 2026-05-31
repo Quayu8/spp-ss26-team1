@@ -1,4 +1,4 @@
-﻿/**
+/**
  * Recording Migration Tests
  *
  * Why these tests matter:
@@ -21,7 +21,7 @@
  * Related docs: docs/2026-04-09-raw-storage-convert-on-read.md
  */
 
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import {
   migrateActionsIfNeeded,
   ODOM_COORD_VERSION,
@@ -971,6 +971,396 @@ describe('recording-migration', () => {
         const raw = payload['rawGpsPoint'] as Record<string, unknown>;
         expect(raw['latitude']).toBe(49);
         expect(raw['coordinates']).toBeUndefined(); // stripped
+      });
+    });
+
+    // =======================================================================
+    // Step 5.6: legacy zip → refPoints translator
+    // =======================================================================
+
+    describe('refPoints injection (Step 5.6)', () => {
+      /**
+       * Why this test matters:
+       * Legacy zips persist only `gpsData/markReferencePoint`; the new flat
+       * `refPoints` slice that the H3 matcher and visualizer read from
+       * (Steps 5.2–5.4) never receives any action on replay unless the
+       * migrator synthesises one. Without this translator, replayed
+       * recordings would render zero ref points.
+       */
+      it('inserts refPoints/addRefPointEntry after each markReferencePoint', () => {
+        const actions: RecordedAction[] = [
+          {
+            type: 'gpsData/markReferencePoint',
+            payload: {
+              id: '8b1fa0a3168efff',
+              position: [1, 2, 3],
+              rotation: [0, 0, 0, 1],
+              rawGpsPoint: {
+                id: 'gps-1',
+                latitude: 49,
+                longitude: 8,
+                timestamp: 1500,
+              },
+              timestamp: 2000,
+            },
+          },
+        ];
+
+        const result = migrateActionsIfNeeded(actions, {
+          odomCoordVersion: 5,
+        });
+
+        expect(result).toHaveLength(2);
+        expect(result[0].type).toBe('gpsData/markReferencePoint');
+        expect(result[1].type).toBe('refPoints/addRefPointEntry');
+        const v2 = result[1].payload as Record<string, unknown>;
+        expect(v2['id']).toBe('8b1fa0a3168efff');
+        expect(v2['timestamp']).toBe(2000);
+        expect(v2['rawGpsPoint']).toEqual({
+          id: 'gps-1',
+          latitude: 49,
+          longitude: 8,
+          timestamp: 1500,
+        });
+      });
+
+      /**
+       * Why this test matters:
+       * The investigation harness recomputes alignment from the raw WebXR
+       * AR pose, which survives only on the legacy `markReferencePoint`
+       * payload. §E.3 forwards `position`/`rotation` (and the display
+       * `name`) into the synthesized `addRefPointEntry` so the post-load
+       * stream is uniform across eras and the harness extractor handles
+       * one action type. See
+       * 2026-05-29-investigation-harness-refpoint-source-migration-plan.md §E.3.
+       */
+      it('forwards position/rotation/name into the injected entry', () => {
+        const actions: RecordedAction[] = [
+          {
+            type: 'gpsData/markReferencePoint',
+            payload: {
+              id: '8b1fa0a3168efff',
+              name: 'Town Hall',
+              position: [1.5, -2.25, 3.75],
+              rotation: [0.1, 0.2, 0.3, 0.9],
+              rawGpsPoint: {
+                id: 'gps-1',
+                latitude: 49,
+                longitude: 8,
+                timestamp: 1500,
+              },
+              timestamp: 2000,
+            },
+          },
+        ];
+
+        const result = migrateActionsIfNeeded(actions, {
+          odomCoordVersion: 5,
+        });
+
+        const v2 = result[1].payload as Record<string, unknown>;
+        expect(v2['position']).toEqual([1.5, -2.25, 3.75]);
+        expect(v2['rotation']).toEqual([0.1, 0.2, 0.3, 0.9]);
+        expect(v2['name']).toBe('Town Hall');
+      });
+
+      /**
+       * Why this test matters:
+       * Pose/name are optional. A legacy mark that lacks them (or carries a
+       * malformed pose) must still synthesise a valid entry — pose/name are
+       * simply omitted so the harness falls back to id and treats the entry
+       * as "not a live mark", rather than persisting a NaN-laden vector.
+       */
+      it('omits pose/name when absent or malformed on the legacy mark', () => {
+        const actions: RecordedAction[] = [
+          {
+            type: 'gpsData/markReferencePoint',
+            payload: {
+              id: '8b1fa0a3168efff',
+              position: [1, 2], // wrong length → omitted
+              rotation: 'nope', // wrong type → omitted
+              rawGpsPoint: {
+                id: 'gps-1',
+                latitude: 49,
+                longitude: 8,
+                timestamp: 1500,
+              },
+              timestamp: 2000,
+            },
+          },
+        ];
+
+        const result = migrateActionsIfNeeded(actions, {
+          odomCoordVersion: 5,
+        });
+
+        const v2 = result[1].payload as Record<string, unknown>;
+        expect(v2['position']).toBeUndefined();
+        expect(v2['rotation']).toBeUndefined();
+        expect(v2['name']).toBeUndefined();
+        // The valid GPS entry is still synthesized.
+        expect(v2['id']).toBe('8b1fa0a3168efff');
+      });
+
+      it('is a no-op when stream already contains refPoints actions', () => {
+        const actions: RecordedAction[] = [
+          {
+            type: 'gpsData/markReferencePoint',
+            payload: {
+              id: 'x',
+              position: [0, 0, 0],
+              rotation: [0, 0, 0, 1],
+              rawGpsPoint: {
+                id: 'g',
+                latitude: 0,
+                longitude: 0,
+                timestamp: 0,
+              },
+              timestamp: 0,
+            },
+          },
+          {
+            type: 'refPoints/addRefPointEntry',
+            payload: {
+              id: 'x',
+              timestamp: 0,
+              rawGpsPoint: {
+                id: 'g',
+                latitude: 0,
+                longitude: 0,
+                timestamp: 0,
+              },
+            },
+          },
+        ];
+        const result = migrateActionsIfNeeded(actions, {
+          odomCoordVersion: 5,
+        });
+        expect(result).toBe(actions); // same reference
+      });
+
+      /**
+       * Why this test matters:
+       * Stream with no markReferencePoint must preserve same-reference for
+       * memory- and equality-sensitive callers.
+       */
+      it('returns same reference when no markReferencePoint exists', () => {
+        const actions: RecordedAction[] = [
+          {
+            type: 'gpsData/recordGpsEvent',
+            payload: {
+              odomPosition: [1, 2, 3],
+              rawGpsPoint: {
+                id: 'g',
+                latitude: 0,
+                longitude: 0,
+                timestamp: 0,
+              },
+            },
+          },
+        ];
+        expect(migrateActionsIfNeeded(actions, { odomCoordVersion: 5 })).toBe(
+          actions
+        );
+      });
+
+      /**
+       * Why this test matters:
+       * Era-1 zips have `gpsPoint` (not `rawGpsPoint`) and no odomCoordVersion;
+       * after the GPS-payload rename pass, the injected refPoints entry
+       * must carry the renamed `rawGpsPoint`.
+       */
+      it('runs after era-1 gpsPoint→rawGpsPoint rename', () => {
+        const actions: RecordedAction[] = [
+          {
+            type: 'gpsData/markReferencePoint',
+            payload: {
+              id: 'r1',
+              position: [1, 2, 3],
+              rotation: [0, 0, 0, 1],
+              gpsPoint: {
+                id: 'g',
+                latitude: 49,
+                longitude: 8,
+                coordinates: [0, 0, 100],
+                weight: 1,
+                timestamp: 1000,
+              },
+              timestamp: 1000,
+            },
+          },
+        ];
+        const result = migrateActionsIfNeeded(actions, null);
+        expect(result).toHaveLength(2);
+        expect(result[1].type).toBe('refPoints/addRefPointEntry');
+        const v2 = result[1].payload as Record<string, unknown>;
+        const raw = v2['rawGpsPoint'] as Record<string, unknown>;
+        expect(raw['latitude']).toBe(49);
+        // derived fields were stripped by era-1 migration before injection
+        expect(raw['coordinates']).toBeUndefined();
+        expect(raw['weight']).toBeUndefined();
+      });
+    });
+
+    // =======================================================================
+    // Step 8: tighten payload validation at the action-loader boundary
+    // (§G.8). The loader is the single normalization point — malformed
+    // `markReferencePoint` payloads must not silently synthesise a broken
+    // `refPoints/addRefPointEntry` whose GPS the H3 matcher and selectors
+    // would later read as `undefined`. Drop + warn instead of dropping
+    // silently (the old listener middleware behaviour the review flagged).
+    // =======================================================================
+
+    describe('refPoints injection payload validation (Step 8)', () => {
+      /**
+       * Why this test matters:
+       * Before Step 8, any `rawGpsPoint` *object* passed the gate — even one
+       * with no coordinates. The synthesised entry then carried a GPS point
+       * whose `latitude`/`longitude` were `undefined`, which the H3 matcher
+       * and `selectKnownAnchorsByCell` read straight into NaN math. Validate
+       * the coordinates at the loader boundary so a malformed mark produces
+       * no entry at all.
+       */
+      it('drops a markReferencePoint whose rawGpsPoint lacks numeric coordinates', () => {
+        const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+        try {
+          const actions: RecordedAction[] = [
+            {
+              type: 'gpsData/markReferencePoint',
+              payload: {
+                id: 'broken',
+                position: [1, 2, 3],
+                rotation: [0, 0, 0, 1],
+                rawGpsPoint: { id: 'g', timestamp: 1000 }, // no lat/lon
+                timestamp: 1000,
+              },
+            },
+          ];
+
+          const result = migrateActionsIfNeeded(actions, {
+            odomCoordVersion: 5,
+          });
+
+          // Original mark preserved, but no synthesised entry for it.
+          expect(result).toHaveLength(1);
+          expect(result[0].type).toBe('gpsData/markReferencePoint');
+          expect(
+            result.some((a) => a.type === 'refPoints/addRefPointEntry')
+          ).toBe(false);
+          // Not silent — the boundary warns about the dropped mark.
+          expect(warn).toHaveBeenCalled();
+        } finally {
+          warn.mockRestore();
+        }
+      });
+
+      /**
+       * Why this test matters:
+       * A non-finite coordinate (NaN/Infinity) is just as poisonous as a
+       * missing one — it must not pass the gate either.
+       */
+      it('drops a markReferencePoint whose coordinates are non-finite', () => {
+        const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+        try {
+          const actions: RecordedAction[] = [
+            {
+              type: 'gpsData/markReferencePoint',
+              payload: {
+                id: 'nan',
+                position: [0, 0, 0],
+                rotation: [0, 0, 0, 1],
+                rawGpsPoint: {
+                  id: 'g',
+                  latitude: Number.NaN,
+                  longitude: 8,
+                  timestamp: 0,
+                },
+                timestamp: 0,
+              },
+            },
+          ];
+
+          const result = migrateActionsIfNeeded(actions, {
+            odomCoordVersion: 5,
+          });
+
+          expect(
+            result.some((a) => a.type === 'refPoints/addRefPointEntry')
+          ).toBe(false);
+          expect(warn).toHaveBeenCalled();
+        } finally {
+          warn.mockRestore();
+        }
+      });
+
+      /**
+       * Why this test matters:
+       * Validation must remain a *filter*, not an all-or-nothing gate: a
+       * single bad mark in a stream must not suppress entries for the valid
+       * marks around it.
+       */
+      it('keeps valid marks while dropping the malformed one in the same stream', () => {
+        const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+        try {
+          const actions: RecordedAction[] = [
+            {
+              type: 'gpsData/markReferencePoint',
+              payload: {
+                id: 'good-1',
+                position: [1, 2, 3],
+                rotation: [0, 0, 0, 1],
+                rawGpsPoint: {
+                  id: 'g1',
+                  latitude: 49,
+                  longitude: 8,
+                  timestamp: 1000,
+                },
+                timestamp: 1000,
+              },
+            },
+            {
+              type: 'gpsData/markReferencePoint',
+              payload: {
+                id: 'bad',
+                position: [4, 5, 6],
+                rotation: [0, 0, 0, 1],
+                rawGpsPoint: { id: 'g2' }, // no lat/lon
+                timestamp: 2000,
+              },
+            },
+            {
+              type: 'gpsData/markReferencePoint',
+              payload: {
+                id: 'good-2',
+                position: [7, 8, 9],
+                rotation: [0, 0, 0, 1],
+                rawGpsPoint: {
+                  id: 'g3',
+                  latitude: 50,
+                  longitude: 9,
+                  timestamp: 3000,
+                },
+                timestamp: 3000,
+              },
+            },
+          ];
+
+          const result = migrateActionsIfNeeded(actions, {
+            odomCoordVersion: 5,
+          });
+
+          const injected = result.filter(
+            (a) => a.type === 'refPoints/addRefPointEntry'
+          );
+          expect(injected).toHaveLength(2);
+          const ids = injected.map(
+            (a) => (a.payload as Record<string, unknown>)['id']
+          );
+          expect(ids).toEqual(['good-1', 'good-2']);
+          expect(warn).toHaveBeenCalledTimes(1);
+        } finally {
+          warn.mockRestore();
+        }
       });
     });
   });

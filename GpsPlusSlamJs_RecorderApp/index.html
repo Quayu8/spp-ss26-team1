@@ -54,6 +54,23 @@
             <span class="text-gray-400">📷 Frames:</span>
             <span id="frame-count" class="text-green-400">0</span>
           </div>
+          <div id="tracking-quality" class="text-sm mt-1 hidden">
+            <div
+              id="tracking-quality-badge"
+              class="text-gray-400 cursor-pointer"
+            >
+              <span id="tq-state"></span>
+              <span id="tq-confidence"></span>
+            </div>
+            <div id="tracking-quality-details" class="hidden text-xs mt-1">
+              <div id="tq-convergence"></div>
+              <div id="tq-sum-rot"></div>
+              <div id="tq-sum-pos"></div>
+              <div id="tq-residual"></div>
+              <div id="tq-gps-accuracy"></div>
+              <div id="tq-coverage"></div>
+            </div>
+          </div>
         </div>
       </div>
 
@@ -1020,6 +1037,24 @@ No errors</pre
                 🧪 Open Isolated WebXR Feature Test
               </a>
             </div>
+          </div>
+
+          <!-- Maintenance / Cache -->
+          <div class="border-t border-gray-700 pt-4 mb-4 space-y-3">
+            <h3 class="text-sm font-semibold text-gray-200">Cache</h3>
+            <p class="text-xs text-gray-400 leading-snug">
+              Clear the cached reference points so they are re-imported from
+              your <code>*.zip</code> recordings the next time a scenario is
+              opened. Any ref-point observations not yet exported to a zip will
+              be lost.
+            </p>
+            <button
+              id="btn-clear-refpoint-cache"
+              type="button"
+              class="w-full px-3 py-2 text-sm bg-orange-700/70 hover:bg-orange-600 text-white rounded"
+            >
+              Clear Reference Point Cache
+            </button>
           </div>
 
           <!-- Build version stamp -->

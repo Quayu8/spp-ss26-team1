@@ -1,4 +1,4 @@
-﻿/**
+/**
  * Recording Migration
  *
  * Migrates recorded Redux actions from older coordinate conventions to the
@@ -40,6 +40,9 @@
  */
 
 import type { RecordedAction } from 'gps-plus-slam-app-framework/storage/zip-reader';
+import { createLogger } from 'gps-plus-slam-app-framework/utils/logger';
+
+const log = createLogger('RecordingMigration');
 
 /** The current odom coordinate convention version written into new session.json files. */
 export const ODOM_COORD_VERSION = 5 as const;
@@ -75,6 +78,14 @@ export function migrateActionsIfNeeded(
   actions: RecordedAction[],
   metadata: Record<string, unknown> | null
 ): RecordedAction[] {
+  const erasMigrated = migrateErasIfNeeded(actions, metadata);
+  return injectRefPointsActions(erasMigrated);
+}
+
+function migrateErasIfNeeded(
+  actions: RecordedAction[],
+  metadata: Record<string, unknown> | null
+): RecordedAction[] {
   const version = metadata
     ? (metadata['odomCoordVersion'] as number | undefined)
     : undefined;
@@ -103,6 +114,112 @@ export function migrateActionsIfNeeded(
   // GPS payloads use old `gpsPoint` with ENU coordinates — rename + strip
   // (coordinates are stripped so no ENU→NUE swap needed).
   return actions.map((action) => migrateGpsPointField(action));
+}
+
+// ---------------------------------------------------------------------------
+// refPoints injection: synthesise `refPoints/addRefPointEntry` after
+// each `gpsData/markReferencePoint` so legacy zips populate the new flat
+// slice that the H3 matcher reads from (Step 5.4) and the OPFS sidecar
+// fast-path writes to (Step 5.5).
+//
+// Idempotent: skipped when the action stream already contains any
+// `refPoints/...` action (future recordings may persist them directly).
+//
+// Plan: [2026-05-27-collapse-refpoint-and-frame-slices-plan.md §B.5 5.6].
+// ---------------------------------------------------------------------------
+
+function injectRefPointsActions(actions: RecordedAction[]): RecordedAction[] {
+  // Idempotency guard — preserve same-reference contract for streams that
+  // already carry the new slice's actions.
+  let hasMark = false;
+  for (const a of actions) {
+    if (a.type.startsWith('refPoints/')) return actions;
+    if (a.type === 'gpsData/markReferencePoint') hasMark = true;
+  }
+  if (!hasMark) return actions;
+
+  const out: RecordedAction[] = [];
+  for (const action of actions) {
+    out.push(action);
+    if (action.type !== 'gpsData/markReferencePoint') continue;
+
+    const payload = action.payload as Record<string, unknown> | undefined;
+    if (!payload || typeof payload !== 'object') continue;
+
+    const id = payload['id'];
+    const rawGpsPoint = payload['rawGpsPoint'] as
+      | Record<string, unknown>
+      | undefined;
+    if (
+      typeof id !== 'string' ||
+      !rawGpsPoint ||
+      typeof rawGpsPoint !== 'object'
+    ) {
+      log.warn(
+        'Dropping malformed gpsData/markReferencePoint: missing string id or rawGpsPoint object',
+        { id, hasRawGpsPoint: Boolean(rawGpsPoint) }
+      );
+      continue;
+    }
+    // Step 8: the loader is the single validation boundary. An object that
+    // is merely *present* is not enough — without finite lat/lon the entry
+    // would feed NaN into the H3 matcher and selectKnownAnchorsByCell.
+    if (
+      !Number.isFinite(rawGpsPoint['latitude']) ||
+      !Number.isFinite(rawGpsPoint['longitude'])
+    ) {
+      log.warn(
+        `Dropping markReferencePoint ${id}: rawGpsPoint lacks finite latitude/longitude`,
+        {
+          latitude: rawGpsPoint['latitude'],
+          longitude: rawGpsPoint['longitude'],
+        }
+      );
+      continue;
+    }
+    const timestamp =
+      typeof payload['timestamp'] === 'number'
+        ? payload['timestamp']
+        : rawGpsPoint['timestamp'];
+
+    // Forward the raw WebXR AR pose + display name so the post-load action
+    // stream is uniform across eras: every `addRefPointEntry` carries the
+    // pose the investigation harness recomputes alignment from, and a
+    // human-readable label when the legacy mark had one. Pose/name are
+    // optional — when a legacy payload lacks them they are simply omitted
+    // (harness falls back to id, treats pose-absence as "not a live mark").
+    // See 2026-05-29-investigation-harness-refpoint-source-migration-plan.md
+    // §E.3.
+    const position = payload['position'];
+    const rotation = payload['rotation'];
+    const name = payload['name'];
+
+    out.push({
+      type: 'refPoints/addRefPointEntry',
+      payload: {
+        id,
+        timestamp: typeof timestamp === 'number' ? timestamp : 0,
+        rawGpsPoint,
+        ...(isFiniteVec(position, 3) ? { position } : {}),
+        ...(isFiniteVec(rotation, 4) ? { rotation } : {}),
+        ...(typeof name === 'string' ? { name } : {}),
+      },
+    });
+  }
+  return out;
+}
+
+/**
+ * True when `value` is an array of exactly `len` finite numbers. Used to
+ * forward only well-formed AR-pose vectors into the synthesized
+ * `refPoints/addRefPointEntry` payload (defensive boundary validation).
+ */
+function isFiniteVec(value: unknown, len: number): value is number[] {
+  return (
+    Array.isArray(value) &&
+    value.length === len &&
+    value.every((n) => typeof n === 'number' && Number.isFinite(n))
+  );
 }
 
 // ---------------------------------------------------------------------------

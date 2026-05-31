@@ -1,4 +1,4 @@
-﻿/**
+/**
  * Recorder Store — composable store for the recorder app.
  *
  * Wraps the framework's `createSlamAppStore` factory and supplies the
@@ -28,8 +28,15 @@ import {
   createSlamAppStore,
   type SlamAppStore,
 } from 'gps-plus-slam-app-framework/state/create-slam-app-store';
-import { refPointsReducer, type RefPointsState } from './ref-points-slice';
+import { slicePrefixOf } from 'gps-plus-slam-app-framework/state';
+import {
+  addRefPointEntry,
+  refPointsReducer,
+  type RefPointsState,
+} from './ref-points-slice';
 import type { RecordingState } from 'gps-plus-slam-app-framework/state/recording-slice';
+import type { TrackingSliceState } from 'gps-plus-slam-app-framework/state/tracking-slice';
+import type { TrackingQualitySliceState } from 'gps-plus-slam-app-framework';
 import type { StorageBackend } from 'gps-plus-slam-app-framework/storage/storage-backend';
 import { OpfsStorageBackend } from 'gps-plus-slam-app-framework/storage/opfs-storage-backend';
 import type { SessionMetadata as OpfsSessionMetadata } from 'gps-plus-slam-app-framework/storage/opfs-storage';
@@ -60,7 +67,6 @@ export {
   setZeroPos,
   recordGpsEvent,
   add2dImage,
-  markReferencePoint,
   calcRelativeCoordsInMeters,
 } from 'gps-plus-slam-app-framework/state';
 
@@ -70,7 +76,6 @@ export type {
   RawGpsPoint,
   RawDeviceOrientation,
   RecordGpsEventPayload,
-  MarkReferencePointPayload,
 } from 'gps-plus-slam-app-framework/state';
 
 export { type RefPointMark } from '../storage/ref-point-loader';
@@ -79,17 +84,7 @@ export type {
   DepthSample,
 } from 'gps-plus-slam-app-framework/types/ar-types';
 
-export {
-  setImportedRefPoints,
-  incrementRefPointUsage,
-  clearSessionRefPointUsage,
-  setPriorRefPointMarks,
-  addCurrentRefPointMark,
-  clearCurrentRefPointMarks,
-  resetRefPointsState,
-  selectCachedKnownRefPoints,
-  type RefPointsState,
-} from './ref-points-slice';
+export type { RefPointsState } from './ref-points-slice';
 
 export type { RecordingOptions } from 'gps-plus-slam-app-framework/state/recording-options';
 export type { StorageBackend } from 'gps-plus-slam-app-framework/storage/storage-backend';
@@ -103,6 +98,8 @@ export type { SessionMetadata as OpfsSessionMetadata } from 'gps-plus-slam-app-f
  */
 export interface CombinedRootState extends LibraryRootState {
   recording: RecordingState;
+  tracking: TrackingSliceState;
+  trackingQuality: TrackingQualitySliceState;
   refPoints: RefPointsState;
   routing: RoutingState;
   scenario: ScenarioState;
@@ -147,6 +144,10 @@ export function createRecorderStore(
     onWriteFailure: options.onWriteFailure,
     enableDevChecks: options.enableDevChecks,
     licenseKey: options.licenseKey,
+    // Persist the recorder-owned refPoints slice. Derived from the slice's
+    // own action type (never a literal) so a rename can't silently drop
+    // marks from recordings — see the 2026-05-28 refPointsV2/ regression.
+    persistedExtraPrefixes: [slicePrefixOf(addRefPointEntry.type)],
     extraReducers: {
       refPoints: refPointsReducer,
       routing: routingReducer,

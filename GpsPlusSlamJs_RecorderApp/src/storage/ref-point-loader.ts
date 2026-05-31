@@ -93,8 +93,15 @@ function isValidObservation(obs: unknown): obs is RefPointObservation {
  * Type guard to validate parsed JSON matches RefPointDefinition shape.
  * Prevents runtime errors from malformed or corrupted JSON files.
  * Also validates each observation to ensure nested properties exist.
+ *
+ * Exported so other sidecar readers (e.g. `recording-loader.ts`) can apply
+ * the same deep validation instead of the shape-only
+ * {@link isRefPointDefinitionShape}, which would let malformed observations
+ * through and later crash consumers like `flattenRefPointsToMarks`.
  */
-function isRefPointDefinition(value: unknown): value is RefPointDefinition {
+export function isRefPointDefinition(
+  value: unknown
+): value is RefPointDefinition {
   if (!isRefPointDefinitionShape(value)) {
     return false;
   }
@@ -118,10 +125,10 @@ async function parseRefPointFile(
     if (isRefPointDefinition(parsed)) {
       return parsed;
     }
-    log.warn(`Invalid schema in ${fileName}`);
+    log.warn(`Invalid schema in "${fileName}"`);
     return null;
   } catch (parseErr) {
-    log.error(`Failed to parse ${fileName}:`, parseErr);
+    log.error(`Failed to parse "${fileName}":`, parseErr);
     return null;
   }
 }
@@ -181,7 +188,7 @@ export async function loadRefPoint(
     const text = await file.text();
     const parsed: unknown = JSON.parse(text);
     if (!isRefPointDefinition(parsed)) {
-      log.warn(`Invalid schema for ${pointId}`);
+      log.warn(`Invalid schema for "${pointId}"`);
       return null;
     }
     return parsed;
@@ -237,7 +244,7 @@ export async function saveRefPointObservation(
       `Saved observation for ${pointId} (${definition.observations.length} total observations)`
     );
   } catch (err) {
-    log.error(`Failed to save reference point ${pointId}:`, err);
+    log.error(`Failed to save reference point "${pointId}":`, err);
     throw err;
   }
 }

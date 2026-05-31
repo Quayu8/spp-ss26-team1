@@ -170,6 +170,246 @@ describe('GpsEventVisualizer', () => {
     });
   });
 
+  // ---------------------------------------------------------------------------
+  // Accuracy-aware raw-GPS ellipsoid (rec31 altitude-drop investigation §3)
+  // ---------------------------------------------------------------------------
+  // Why these tests matter:
+  // - In replay mode we want the yellow sphere to encode GPS 1σ accuracy via
+  //   non-uniform scale. The scale must be passed BOTH-axes-or-nothing — a
+  //   half-populated accuracy field would otherwise produce a degenerate
+  //   ellipsoid (zero or NaN axis).
+  // - The cyan fused / red snapshot markers must remain a uniform fixed-size
+  //   sphere regardless of the new accuracy argument.
+  describe('addGpsEvent accuracy-aware ellipsoid (§3)', () => {
+    const setupZero = () => {
+      visualizer.setZeroRef({ lat: 48.8566, lon: 2.3522 });
+    };
+    const findRaw = (): THREE.Mesh =>
+      mockScene.children.find((c) =>
+        c.name.startsWith('raw-gps-')
+      ) as THREE.Mesh;
+    const findFused = (): THREE.Mesh =>
+      mockArWorldGroup.children.find((c) =>
+        c.name.startsWith('fused-')
+      ) as THREE.Mesh;
+
+    it('applies non-uniform mesh.scale when both accuracies are positive', () => {
+      setupZero();
+
+      visualizer.addGpsEvent([10, 5, 20], [1, 2, 3], {
+        horizontal: 4.5,
+        vertical: 12,
+      });
+
+      const raw = findRaw();
+      // Unit sphere scaled by accuracy: (h, v, h)
+      const geo = raw.geometry as THREE.SphereGeometry;
+      expect(geo.parameters.radius).toBeCloseTo(1);
+      expect(raw.scale.x).toBeCloseTo(4.5);
+      expect(raw.scale.y).toBeCloseTo(12);
+      expect(raw.scale.z).toBeCloseTo(4.5);
+    });
+
+    it('falls back to legacy fixed 8 cm sphere when accuracy is omitted', () => {
+      setupZero();
+
+      visualizer.addGpsEvent([10, 5, 20], [1, 2, 3]);
+
+      const raw = findRaw();
+      const geo = raw.geometry as THREE.SphereGeometry;
+      expect(geo.parameters.radius).toBeCloseTo(0.08);
+      // Identity scale
+      expect(raw.scale.x).toBeCloseTo(1);
+      expect(raw.scale.y).toBeCloseTo(1);
+      expect(raw.scale.z).toBeCloseTo(1);
+    });
+
+    it('treats horizontal ≤ 0 as missing (no scale applied)', () => {
+      setupZero();
+
+      visualizer.addGpsEvent([10, 5, 20], [1, 2, 3], {
+        horizontal: 0,
+        vertical: 12,
+      });
+
+      const raw = findRaw();
+      expect(
+        (raw.geometry as THREE.SphereGeometry).parameters.radius
+      ).toBeCloseTo(0.08);
+      expect(raw.scale.x).toBeCloseTo(1);
+      expect(raw.scale.y).toBeCloseTo(1);
+      expect(raw.scale.z).toBeCloseTo(1);
+    });
+
+    it('treats vertical ≤ 0 as missing (no scale applied)', () => {
+      setupZero();
+
+      visualizer.addGpsEvent([10, 5, 20], [1, 2, 3], {
+        horizontal: 4.5,
+        vertical: -1,
+      });
+
+      const raw = findRaw();
+      expect(
+        (raw.geometry as THREE.SphereGeometry).parameters.radius
+      ).toBeCloseTo(0.08);
+      expect(raw.scale.x).toBeCloseTo(1);
+    });
+
+    it('treats undefined fields as missing (no scale applied)', () => {
+      setupZero();
+
+      visualizer.addGpsEvent([10, 5, 20], [1, 2, 3], {
+        horizontal: 4.5,
+        // vertical omitted
+      });
+
+      const raw = findRaw();
+      expect(
+        (raw.geometry as THREE.SphereGeometry).parameters.radius
+      ).toBeCloseTo(0.08);
+      expect(raw.scale.x).toBeCloseTo(1);
+    });
+
+    // Why this test matters: although the `accuracy` parameter is typed
+    // `GpsEventAccuracy | undefined`, this is exported library API. A non-TS
+    // caller (or a nullable API response forwarded verbatim) could pass `null`.
+    // Before the `== null` guard, the `=== undefined` check let `null` through
+    // and the subsequent destructuring (`const { horizontal, vertical } =
+    // accuracy`) threw a TypeError, crashing the marker render. This asserts
+    // `null` falls back to the legacy fixed 8 cm sphere instead of throwing.
+    it('treats explicit null accuracy as missing (no crash, legacy sphere)', () => {
+      setupZero();
+
+      expect(() =>
+        visualizer.addGpsEvent(
+          [10, 5, 20],
+          [1, 2, 3],
+          null as unknown as undefined
+        )
+      ).not.toThrow();
+
+      const raw = findRaw();
+      expect(
+        (raw.geometry as THREE.SphereGeometry).parameters.radius
+      ).toBeCloseTo(0.08);
+      expect(raw.scale.x).toBeCloseTo(1);
+      expect(raw.scale.y).toBeCloseTo(1);
+      expect(raw.scale.z).toBeCloseTo(1);
+    });
+
+    // A non-finite accuracy (Infinity/NaN) must fall back to the fixed sphere:
+    // scaling a Three.js mesh by Infinity corrupts its world matrix and can
+    // crash rendering. `Infinity > 0` is true, so the positive-value guard
+    // alone would let it through — this asserts the Number.isFinite guard.
+    it('treats Infinity accuracy as missing (no scale applied)', () => {
+      setupZero();
+
+      visualizer.addGpsEvent([10, 5, 20], [1, 2, 3], {
+        horizontal: Infinity,
+        vertical: 12,
+      });
+
+      const raw = findRaw();
+      expect(
+        (raw.geometry as THREE.SphereGeometry).parameters.radius
+      ).toBeCloseTo(0.08);
+      expect(raw.scale.x).toBeCloseTo(1);
+      expect(raw.scale.y).toBeCloseTo(1);
+      expect(raw.scale.z).toBeCloseTo(1);
+    });
+
+    it('treats NaN accuracy as missing (no scale applied)', () => {
+      setupZero();
+
+      visualizer.addGpsEvent([10, 5, 20], [1, 2, 3], {
+        horizontal: 4.5,
+        vertical: NaN,
+      });
+
+      const raw = findRaw();
+      expect(
+        (raw.geometry as THREE.SphereGeometry).parameters.radius
+      ).toBeCloseTo(0.08);
+      expect(raw.scale.x).toBeCloseTo(1);
+    });
+
+    it('lowers raw-GPS opacity when ellipsoid mode is active (so cyan/red stay visible inside)', () => {
+      setupZero();
+
+      visualizer.addGpsEvent([10, 5, 20], [1, 2, 3], {
+        horizontal: 4.5,
+        vertical: 12,
+      });
+
+      const raw = findRaw();
+      const mat = raw.material as THREE.MeshBasicMaterial;
+      // Picked from plan range 0.12–0.15.
+      expect(mat.opacity).toBeLessThan(0.16);
+      expect(mat.opacity).toBeGreaterThan(0.1);
+    });
+
+    it('keeps raw-GPS opacity at the legacy 0.3 when no accuracy is passed', () => {
+      setupZero();
+
+      visualizer.addGpsEvent([10, 5, 20], [1, 2, 3]);
+
+      const raw = findRaw();
+      const mat = raw.material as THREE.MeshBasicMaterial;
+      expect(mat.opacity).toBeCloseTo(0.3);
+    });
+
+    it('cyan fused marker is NOT scaled by accuracy', () => {
+      setupZero();
+
+      visualizer.addGpsEvent([10, 5, 20], [1, 2, 3], {
+        horizontal: 4.5,
+        vertical: 12,
+      });
+
+      const fused = findFused();
+      const geo = fused.geometry as THREE.SphereGeometry;
+      // Cyan keeps the legacy fixed 8 cm radius and identity scale.
+      expect(geo.parameters.radius).toBeCloseTo(0.08);
+      expect(fused.scale.x).toBeCloseTo(1);
+      expect(fused.scale.y).toBeCloseTo(1);
+      expect(fused.scale.z).toBeCloseTo(1);
+    });
+
+    it('red snapshot marker is NOT affected by addGpsEvent accuracy', () => {
+      setupZero();
+
+      visualizer.addGpsEvent([10, 5, 20], [1, 2, 3], {
+        horizontal: 4.5,
+        vertical: 12,
+      });
+      visualizer.addAlignmentSnapshot([10, 5, 20]);
+
+      const snap = mockScene.children.find((c) =>
+        c.name.startsWith('alignment-snapshot-')
+      ) as THREE.Mesh;
+      const geo = snap.geometry as THREE.SphereGeometry;
+      expect(geo.parameters.radius).toBeCloseTo(0.1);
+      expect(snap.scale.x).toBeCloseTo(1);
+      expect(snap.scale.y).toBeCloseTo(1);
+      expect(snap.scale.z).toBeCloseTo(1);
+    });
+
+    it('raw-GPS ellipsoid gets renderOrder < 0 so cyan/red draw on top', () => {
+      // Why: large translucent ellipsoids must render before smaller markers
+      // so the cyan / red spheres inside them remain visible.
+      setupZero();
+
+      visualizer.addGpsEvent([10, 5, 20], [1, 2, 3], {
+        horizontal: 4.5,
+        vertical: 12,
+      });
+
+      const raw = findRaw();
+      expect(raw.renderOrder).toBeLessThan(0);
+    });
+  });
+
   describe('scene-graph propagation (alignment via arWorldGroup)', () => {
     it('fused markers get correct world position when arWorldGroup has alignment matrix', () => {
       // Why: this verifies the core architectural change — fused markers are
@@ -332,6 +572,57 @@ describe('GpsEventVisualizer', () => {
         fused: 2,
         snapshots: 0,
       });
+    });
+  });
+
+  describe('getRawMarkerWorldSizes (§3c bbox diagnostic)', () => {
+    /**
+     * Why these tests matter: the rec31 accuracy-ellipsoid Playwright spec
+     * relies on this accessor to read back the world-space size of each
+     * raw-GPS marker via `THREE.Box3.setFromObject`. Bounding-box math is
+     * the real invariant we want to test (pixel diffs are brittle).
+     */
+
+    it('returns an empty array when no markers exist', () => {
+      expect(visualizer.getRawMarkerWorldSizes()).toEqual([]);
+    });
+
+    it('returns markedly larger bbox for a low-accuracy event (large reported uncertainty) than for a high-accuracy event', () => {
+      visualizer.setZeroRef({ lat: 48.8566, lon: 2.3522 });
+
+      // Same position so positions don't dominate the bbox — only scale differs.
+      visualizer.addGpsEvent([0, 0, 0], [0, 0, 0], {
+        horizontal: 5,
+        vertical: 5,
+      });
+      visualizer.addGpsEvent([0, 0, 0], [0, 0, 0], {
+        horizontal: 40,
+        vertical: 40,
+      });
+
+      const sizes = visualizer.getRawMarkerWorldSizes();
+      expect(sizes).toHaveLength(2);
+      // Sphere diameter = 2 × radius (= 1) × scale.
+      // Event 1 (high accuracy, 5 m uncertainty): ~10m on each axis.
+      // Event 2 (low accuracy, 40 m uncertainty): ~80m. Allow tolerance for
+      // the sphere-tessellation approximation in Box3.setFromObject.
+      expect(sizes[0].x).toBeGreaterThan(8);
+      expect(sizes[0].x).toBeLessThan(12);
+      expect(sizes[1].x).toBeGreaterThan(70);
+      expect(sizes[1].x).toBeLessThan(90);
+      // Ratio should be close to 8 (= 40/5).
+      expect(sizes[1].x / sizes[0].x).toBeGreaterThan(6);
+      expect(sizes[1].x / sizes[0].x).toBeLessThan(10);
+    });
+
+    it('legacy fixed sphere has ~16cm bbox (2 × 8cm radius)', () => {
+      visualizer.setZeroRef({ lat: 48.8566, lon: 2.3522 });
+      visualizer.addGpsEvent([0, 0, 0], [0, 0, 0]); // no accuracy → legacy
+
+      const sizes = visualizer.getRawMarkerWorldSizes();
+      expect(sizes).toHaveLength(1);
+      expect(sizes[0].x).toBeGreaterThan(0.1);
+      expect(sizes[0].x).toBeLessThan(0.2);
     });
   });
 

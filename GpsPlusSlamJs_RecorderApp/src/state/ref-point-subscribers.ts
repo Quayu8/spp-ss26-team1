@@ -1,73 +1,42 @@
 /**
- * Recorder-app subscribers for the ref-points slice.
+ * Recorder-app subscriber for the 3D ref-point visualizer.
  *
- * Iter 3 of the AppFramework / RecorderApp boundary cleanup moved ref-point
- * ownership out of the framework. The framework's `wireStoreSubscribers` no
- * longer touches the visualizer, so the recorder wires those subscriptions
- * locally with the same invariants that were previously enforced inside the
- * framework's `store-subscribers.ts`:
- *
- *  - prior marks → exactly one `displayPriorRefPoints` call per `priorMarks`
- *    state change.
- *  - current marks → exactly one `addCurrentRefPoint` call per appended mark.
- *  - clear semantics: when `currentMarks` shrinks, the high-water mark resets
- *    so the next dispatched mark renders a fresh sphere.
- *
- * See gps-plus-slam/GpsPlusSlamJs_Docs/docs/2026-05-03-appframework-vs-recorderapp-boundary-analysis.md
+ * Step 5.3 of 2026-05-27-collapse-refpoint-and-frame-slices-plan.md
+ * migrated this wiring from the library's `selectReferencePoints`
+ * (over `state.gpsData.referencePoints`) onto the recorder-side flat
+ * `selectRefPointEntries` selector (over `state.refPoints.entries`).
+ * The visualizer's `syncRefPoints` method now consumes `RefPointEntry`
+ * directly and renders all entries uniformly, animating newly-inserted
+ * ids via an id-based diff.
  */
 
 import type { RecorderStore } from './recorder-store';
-import type { RefPointMark } from '../storage/ref-point-loader';
+import { selectRefPointEntries } from './ref-points-slice';
 import type { RefPointVisualizer } from '../visualization/ref-point-visualizer';
 
 /**
- * Wire the visualizer to the ref-points slice. Returns an unsubscribe
- * function that detaches the subscription.
+ * Wire the 3D visualizer to the recorder's flat `refPoints` slice.
+ * Returns an unsubscribe function that detaches the store listener.
  *
  * Tolerates a missing visualizer (e.g. in headless replay paths) by
  * returning a no-op unsubscribe.
  */
 export function wireRefPointSubscribers(
   store: RecorderStore,
-  visualizer: Pick<
-    RefPointVisualizer,
-    'displayPriorRefPoints' | 'addCurrentRefPoint'
-  > | null
+  visualizer: Pick<RefPointVisualizer, 'syncRefPoints'> | null
 ): () => void {
   if (!visualizer) return () => {};
 
-  let lastPriorMarks: readonly RefPointMark[] | null = null;
-  let lastCurrentMarksLen = 0;
+  let last = selectRefPointEntries(store.getState().refPoints);
+  // Initial sync on attach so any already-present entries (e.g. imported
+  // via the OPFS sidecar fast-path before the subscriber attached) render
+  // immediately.
+  visualizer.syncRefPoints(last);
 
-  const handleChange = () => {
-    const refPoints = store.getState().refPoints;
-    const priorMarks = refPoints?.priorMarks ?? [];
-    const currentMarks = refPoints?.currentMarks ?? [];
-
-    if (priorMarks !== lastPriorMarks) {
-      lastPriorMarks = priorMarks;
-      const withGps = priorMarks.filter(
-        (
-          m
-        ): m is RefPointMark & {
-          gpsPosition: NonNullable<RefPointMark['gpsPosition']>;
-        } => m.gpsPosition !== undefined
-      );
-      visualizer.displayPriorRefPoints(withGps);
-    }
-
-    if (currentMarks.length < lastCurrentMarksLen) {
-      // Slice shrunk → caller cleared (e.g. scenario reset). Reset
-      // the high-water mark so the next dispatched mark renders a sphere.
-      lastCurrentMarksLen = 0;
-    }
-    while (lastCurrentMarksLen < currentMarks.length) {
-      const next = currentMarks[lastCurrentMarksLen];
-      lastCurrentMarksLen++;
-      if (!next || !next.gpsPosition) continue;
-      visualizer.addCurrentRefPoint(next);
-    }
-  };
-
-  return store.subscribe(handleChange);
+  return store.subscribe(() => {
+    const next = selectRefPointEntries(store.getState().refPoints);
+    if (next === last) return;
+    last = next;
+    visualizer.syncRefPoints(next);
+  });
 }

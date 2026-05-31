@@ -2,7 +2,7 @@
 
 ## Purpose
 
-Embeds a full interactive Leaflet map into the Three.js 3D scene via `CSS3DObject`. Replaces the old single-tile `MapOverlay` with multi-tile rendering, native pan/zoom, and live GPS overlay layers (raw path, fused path, alignment snapshots, reference points).
+Embeds a full interactive Leaflet map into the Three.js 3D scene via `CSS3DObject`. Replaces the old single-tile `MapOverlay` with multi-tile rendering, native pan/zoom, and live GPS trajectory layers. The trajectory (raw GPS path + accuracy circles, fused path, alignment snapshots, optional user-position dot) is drawn from a single resolved `MapData` snapshot via the shared `drawMapData` routine — the SAME routine the 2D session-summary map uses — supplied through `render(data)`. Reference-point markers are an app concept driven separately via the generic named-marker API.
 
 ## Public API
 
@@ -31,25 +31,23 @@ Constructor — creates an overlay instance (does not show it yet).
 
 ### Key Methods
 
-| Method                             | Description                                                                                                                          |
-| ---------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
-| `setGpsPosition(lat, lon)`         | Set/update GPS position; centers map and moves user dot                                                                              |
-| `show()`                           | Create Leaflet map + CSS3DObject; requires GPS position                                                                              |
-| `hide()`                           | Remove CSS3DObject from scene (preserves buffered data)                                                                              |
-| `toggle()`                         | Toggle visibility                                                                                                                    |
-| `addRawGpsPoint(lat, lon)`         | Append point to raw GPS polyline (yellow)                                                                                            |
-| `addFusedPoint(lat, lon)`          | Append point to fused polyline (cyan)                                                                                                |
-| `addAlignmentSnapshot(lat, lon)`   | Add point to red alignment snapshot polyline                                                                                         |
-| `addCurrentMarker(lat, lon, name)` | Add a generic "current" named marker (red dot, popup label). App-defined semantics — used by recorder for newly observed ref-points. |
-| `addPriorMarker(lat, lon, name)`   | Add a "prior" named marker (green, decorated with 📌). Used by recorder for historical ref-points loaded from prior sessions.        |
-| `addPriorMarkers(markers)`         | Bulk-add prior markers.                                                                                                              |
-| `clearPriorMarkers()`              | Remove all prior markers; current markers untouched.                                                                                 |
-| `setZoomLevel(zoom)`               | Set zoom level (clamped 0–19)                                                                                                        |
-| `zoomIn()`                         | Increment zoom by 1 (clamped at max)                                                                                                 |
-| `zoomOut()`                        | Decrement zoom by 1 (clamped at min)                                                                                                 |
-| `getLeafletMap()`                  | Returns the Leaflet `L.Map` instance or `null`                                                                                       |
-| `updatePosition()`                 | No-op (backward compat with frame-loop call)                                                                                         |
-| `dispose()`                        | Full cleanup — hides, destroys map, clears buffers                                                                                   |
+| Method                             | Description                                                                                                                                                                                                                       |
+| ---------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `setGpsPosition(lat, lon)`         | Set/update GPS position; centers the map (user dot is drawn from `MapData`)                                                                                                                                                       |
+| `show()`                           | Create Leaflet map + CSS3DObject; requires GPS position                                                                                                                                                                           |
+| `hide()`                           | Remove CSS3DObject from scene (preserves buffered data)                                                                                                                                                                           |
+| `toggle()`                         | Toggle visibility                                                                                                                                                                                                                 |
+| `render(data)`                     | Draw a full trajectory snapshot (`MapData`) via the shared `drawMapData` routine; replaces the previous layers wholesale (buffered before `show()`). Fused path recomputes from the latest matrix (D2), matching the summary map. |
+| `addCurrentMarker(lat, lon, name)` | Add a generic "current" named marker (red dot, popup label). App-defined semantics — used by recorder for newly observed ref-points.                                                                                              |
+| `addPriorMarker(lat, lon, name)`   | Add a "prior" named marker (green, decorated with 📌). Used by recorder for historical ref-points loaded from prior sessions.                                                                                                     |
+| `addPriorMarkers(markers)`         | Bulk-add prior markers.                                                                                                                                                                                                           |
+| `clearPriorMarkers()`              | Remove all prior markers; current markers untouched.                                                                                                                                                                              |
+| `setZoomLevel(zoom)`               | Set zoom level (clamped 0–19)                                                                                                                                                                                                     |
+| `zoomIn()`                         | Increment zoom by 1 (clamped at max)                                                                                                                                                                                              |
+| `zoomOut()`                        | Decrement zoom by 1 (clamped at min)                                                                                                                                                                                              |
+| `getLeafletMap()`                  | Returns the Leaflet `L.Map` instance or `null`                                                                                                                                                                                    |
+| `updatePosition()`                 | No-op (backward compat with frame-loop call)                                                                                                                                                                                      |
+| `dispose()`                        | Full cleanup — hides, destroys map, clears buffers                                                                                                                                                                                |
 
 ### Exported Constants
 
@@ -61,18 +59,18 @@ Constructor — creates an overlay instance (does not show it yet).
 ## Invariants & Assumptions
 
 - `show()` is a no-op if no GPS position has been set via `setGpsPosition()`.
-- Overlay data (`addRawGpsPoint`, etc.) is **buffered** — can be called before `show()` and will be rendered when the map becomes visible.
+- The trajectory snapshot passed to `render()` is **buffered** — it can be supplied before `show()` and is drawn when the map becomes visible. Each `render()` removes the previous trajectory layers and redraws, so the live fused path "snaps" as the alignment matrix improves.
 - The Leaflet container is appended to `offscreenRoot` (default: `document.body`) off-screen (`position: fixed; left: -9999px`) for Leaflet initialization. When `show()` creates the CSS3DObject, these off-screen styles are **cleared** — CSS3DRenderer positions elements via CSS transforms, which are visual-only offsets from the element's layout position. Retaining `position: fixed` with `left/top: -9999px` would push the element off-screen because the transform applies on top of that extreme offset.
 - **No hardcoded CSS class names** on Leaflet markers — internal markers use empty `className` to avoid coupling to external stylesheets.
-- User position dot color uses `VIS_COLORS.USER_POSITION.css` from the centralized palette.
+- Trajectory colors (raw GPS yellow, fused cyan, snapshot red, user-position blue) live in the shared `map-overlay-draw.ts` / `VIS_COLORS` palette — the overlay no longer draws them itself.
 - CSS3DObject scale = `worldSize / mapSizePx` so the DOM map appears at the configured world size.
 - CSS3DObject is parented to `mapParent` (default: camera), positioned at `(0, heightOffset, -0.5)`, rotated `−π/2` on X to lie in the XZ plane.
-- Colors match `VIS_COLORS` constants: raw GPS = yellow, fused = cyan, snapshot = red.
 
 ## Examples
 
 ```ts
 import { LeafletMapOverlay } from './leaflet-map-overlay';
+import { buildMapData } from './map-data';
 
 const overlay = new LeafletMapOverlay(scene, camera, {
   mapParent: cameraFollower.object3D,
@@ -81,9 +79,16 @@ const overlay = new LeafletMapOverlay(scene, camera, {
 overlay.setGpsPosition(49.99, 8.24);
 overlay.show();
 
-// Live data from store subscribers:
-overlay.addRawGpsPoint(49.991, 8.241);
-overlay.addFusedPoint(49.991, 8.241);
+// Live data from store subscribers — build a full snapshot and render it:
+overlay.render(
+  buildMapData({
+    rawGpsPath,
+    odometryPositions,
+    alignmentMatrix,
+    zeroRef,
+    alignmentSnapshots,
+  })
+);
 
 // Cleanup:
 overlay.dispose();

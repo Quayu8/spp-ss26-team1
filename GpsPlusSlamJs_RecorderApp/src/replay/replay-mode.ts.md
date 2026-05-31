@@ -28,7 +28,7 @@ Orchestrates all replay building blocks (Iterations 1-5) into a single entry poi
 | `getEngine()`       | `() => ReplayEngine`        | Get the underlying engine                    |
 | `getStore()`        | `() => RecorderStore`       | Get the replay store (R6: same instance)     |
 | `getActionCount()`  | `() => number`              | Total number of loaded actions               |
-| `setMapOverlay(o)`  | `(MapOverlay                | null) => void`                               | Set/clear the real map overlay target for the proxy (forwards setGpsPosition, addRawGpsPoint, addFusedPoint, addAlignmentSnapshot, addRefPoint) |
+| `setMapOverlay(o)`  | `(MapOverlay                | null) => void`                               | Set/clear the real map overlay target for the proxy (forwards setGpsPosition, render, addCurrentMarker) |
 | `dispose()`         | `() => void`                | Clean up scene, engine, and subscribers      |
 
 ## Invariants & Assumptions
@@ -40,7 +40,7 @@ Orchestrates all replay building blocks (Iterations 1-5) into a single entry poi
 - **R9 / Issue #3 (Orbit auto-follow):** `onNewGpsPosition` is intentionally **not** wired. The orbit target is now driven by `onAlignmentSnapshot` (Issue #3), which fires when alignment-matrix changes create a snapshot. The snapshot NUE position ($A_k \cdot p_k$) is in scene-root space and is passed directly to `updateOrbitTarget()`. This centers the orbit camera on the system's best-estimate GPS position (coinciding with the visible red snapshot spheres) rather than tracking every odom pose.
 - **6.2 (AR pose replay):** `onNewOdomPose` callback writes recorded `odomPosition`/`odomRotation` to the `arpose` Object3D (via `getArPose()`) each time a new GPS event is dispatched. Positions are converted from NUE to WebXR space via `nuePositionToWebXR()` before setting arpose.position, and rotations are converted from NUE to WebXR via `nueQuaternionToWebXR()` before setting arpose.quaternion, because `applyAlignmentMatrix()` composes the alignment with `WEBXR_TO_NUE`. This ensures `(alignment × W2N) × arpose_WebXR = alignment × odom_NUE` for both position and rotation. The `onNewOdomPose` callback no longer updates the orbit target — that responsibility moved to `onAlignmentSnapshot` (Issue #3).
 - `initReplayScene()` is called once; `disposeReplayScene()` is called on dispose.
-- The `mapOverlay` subscriber dep is a **proxy** that delegates to a late-bound real overlay via `setMapOverlay()`. This allows store subscribers to forward GPS updates to the map even though the overlay is created lazily by `handleReplayMapToggle`. The proxy forwards all 5 overlay methods: `setGpsPosition`, `addRawGpsPoint`, `addFusedPoint`, `addAlignmentSnapshot`, and `addRefPoint`. Each method uses optional chaining on the target so calls are silently dropped when no real overlay is bound.
+- The `mapOverlay` subscriber dep is a **proxy** that delegates to a late-bound real overlay via `setMapOverlay()`. This allows store subscribers to forward map updates to the overlay even though the overlay is created lazily by `handleReplayMapToggle`. The proxy forwards three overlay methods: `setGpsPosition` (recenter), `render` (the unified `MapData` trajectory snapshot), and `addCurrentMarker` (reference points). Each method uses optional chaining on the target so calls are silently dropped when no real overlay is bound.
 
 ## Examples
 
@@ -64,7 +64,7 @@ controller.dispose();
 
 ## Tests
 
-- Unit tests: [replay-mode.test.ts](replay-mode.test.ts) — 18 tests covering:
+- Unit tests: [replay-mode.test.ts](replay-mode.test.ts) — 20 tests covering:
   - Data flow: zip → actions → store (R8)
   - Scene initialization with container
   - Store identity for subscribers (R6)
@@ -76,4 +76,4 @@ controller.dispose();
   - Error handling wiring (R7)
   - Pause/resume
   - Speed changes
-  - `setMapOverlay` proxy delegation, null clearing, and forwarding of Phase 1b methods (addFusedPoint, addAlignmentSnapshot, addRefPoint)
+  - `setMapOverlay` proxy delegation, null clearing, and forwarding of `render` (MapData) and `addCurrentMarker`

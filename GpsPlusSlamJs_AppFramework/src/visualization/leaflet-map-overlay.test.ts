@@ -12,7 +12,7 @@
  * 1. Constructor / defaults — verifies configuration
  * 2. Show / hide / toggle — visibility lifecycle
  * 3. GPS position — setGpsPosition and map centering
- * 4. Live overlays — addRawGpsPoint, addFusedPoint, etc.
+ * 4. Live overlays — render(MapData) trajectory snapshots
  * 5. Dispose — resource cleanup
  * 6. Store subscriber compatibility — matches { setGpsPosition } interface
  *
@@ -69,6 +69,24 @@ function createMockMarker() {
     getLatLng: vi.fn(() => ({ lat: 0, lng: 0 })),
   };
   return m;
+}
+
+function createMockCircle() {
+  const c = {
+    addTo: vi.fn().mockReturnThis(),
+    remove: vi.fn(),
+    setStyle: vi.fn(),
+    setRadius: vi.fn().mockReturnThis(),
+  };
+  return c;
+}
+
+function createMockBounds() {
+  const b = {
+    extend: vi.fn().mockReturnThis(),
+    isValid: vi.fn(() => false),
+  };
+  return b;
 }
 
 function createMockMap() {
@@ -151,6 +169,15 @@ vi.mock('leaflet', () => {
         }
         return m;
       }),
+      circle: vi.fn(() => {
+        const c = createMockCircle();
+        // Register with map layers for eachLayer
+        if (lastMapInstance) {
+          lastMapInstance._addLayer(c);
+        }
+        return c;
+      }),
+      latLngBounds: vi.fn(() => createMockBounds()),
       divIcon: vi.fn(() => ({})),
     },
   };
@@ -192,6 +219,7 @@ import {
   DEFAULT_ZOOM,
   type LeafletMapOverlayOptions,
 } from './leaflet-map-overlay';
+import type { MapData } from './map-data';
 
 // ---------------------------------------------------------------------------
 // Test helpers
@@ -412,14 +440,34 @@ describe('LeafletMapOverlay', () => {
   });
 
   // ---------------------------------------------------------------------------
-  // 4. Live overlays
+  // 4. Live overlays (render(MapData))
   // ---------------------------------------------------------------------------
 
   describe('live overlays', () => {
+    function sampleMapData(): MapData {
+      return {
+        userPosition: { lat: 50.0, lng: 8.0 },
+        rawGpsPath: [
+          { lat: 50.0, lng: 8.0 },
+          { lat: 50.001, lng: 8.001 },
+          { lat: 50.002, lng: 8.002 },
+        ],
+        fusedPath: [
+          { lat: 50.0, lng: 8.0 },
+          { lat: 50.001, lng: 8.001 },
+        ],
+        alignmentSnapshots: [
+          { lat: 50.001, lng: 8.001 },
+          { lat: 50.002, lng: 8.002 },
+        ],
+      };
+    }
+
     // Why: User position dot should be shown on the map
     it('should show user position marker at current GPS location', () => {
       const { overlay } = createOverlay();
       overlay.setGpsPosition(50.0, 8.0);
+      overlay.render(sampleMapData());
       overlay.show();
 
       // User dot should exist on the map
@@ -435,17 +483,15 @@ describe('LeafletMapOverlay', () => {
       overlay.dispose();
     });
 
-    // Why: Raw GPS path tracks the yellow polyline of raw GPS readings
-    it('should add raw GPS points as a yellow polyline', () => {
+    // Why: render() draws the trajectory polylines (raw/fused/snapshot)
+    it('should draw trajectory polylines from a MapData snapshot', () => {
       const { overlay } = createOverlay();
       overlay.setGpsPosition(50.0, 8.0);
       overlay.show();
 
-      overlay.addRawGpsPoint(50.0, 8.0);
-      overlay.addRawGpsPoint(50.001, 8.001);
-      overlay.addRawGpsPoint(50.002, 8.002);
+      overlay.render(sampleMapData());
 
-      // Should have a polyline layer
+      // Should have polyline layers (raw + fused + snapshot)
       const map = overlay.getLeafletMap()!;
       let polylineCount = 0;
       map.eachLayer((layer) => {
@@ -453,62 +499,45 @@ describe('LeafletMapOverlay', () => {
           polylineCount++;
         }
       });
-      expect(polylineCount).toBeGreaterThanOrEqual(1);
+      expect(polylineCount).toBeGreaterThanOrEqual(3);
       overlay.dispose();
     });
 
-    // Why: Fused path tracks the cyan polyline of SLAM-aligned positions
-    it('should add fused points as a cyan polyline', () => {
+    // Why: A fresh render must replace the previous layers, not accumulate them
+    it('should replace previous layers on a subsequent render', () => {
       const { overlay } = createOverlay();
       overlay.setGpsPosition(50.0, 8.0);
       overlay.show();
 
-      overlay.addFusedPoint(50.0, 8.0);
-      overlay.addFusedPoint(50.001, 8.001);
-
+      overlay.render(sampleMapData());
       const map = overlay.getLeafletMap()!;
-      let polylineCount = 0;
-      map.eachLayer((layer) => {
-        if ('getLatLngs' in layer && 'setStyle' in layer) {
-          polylineCount++;
-        }
-      });
-      // At least 1 polyline (fused — raw might not have points yet)
-      expect(polylineCount).toBeGreaterThanOrEqual(1);
+      const countPolylines = () => {
+        let n = 0;
+        map.eachLayer((layer) => {
+          if ('getLatLngs' in layer && 'setStyle' in layer) {
+            n++;
+          }
+        });
+        return n;
+      };
+      const firstBatch = polylineInstances.slice();
+      expect(countPolylines()).toBeGreaterThanOrEqual(3);
+
+      // Second render with the same shape — previous polylines must be removed
+      overlay.render(sampleMapData());
+      for (const pl of firstBatch) {
+        expect(pl.remove).toHaveBeenCalled();
+      }
       overlay.dispose();
     });
 
-    // Why: Red polyline connects alignment snapshots (system GPS estimates at each alignment update)
-    it('should add alignment snapshot as a red polyline segment', () => {
-      const { overlay } = createOverlay();
-      overlay.setGpsPosition(50.0, 8.0);
-      overlay.show();
-
-      overlay.addAlignmentSnapshot(50.001, 8.001);
-      overlay.addAlignmentSnapshot(50.002, 8.002);
-
-      const map = overlay.getLeafletMap()!;
-      let polylineCount = 0;
-      map.eachLayer((layer) => {
-        if ('addLatLng' in (layer as unknown as Record<string, unknown>)) {
-          polylineCount++;
-        }
-      });
-      // raw GPS polyline + fused polyline (if any) + snapshot polyline
-      expect(polylineCount).toBeGreaterThanOrEqual(1);
-      overlay.dispose();
-    });
-
-    // Why: Points added before show() should appear when the map is shown
-    it('should buffer overlay data added before show()', () => {
+    // Why: A MapData snapshot supplied before show() should appear on show()
+    it('should buffer a MapData snapshot supplied before show()', () => {
       const { overlay } = createOverlay();
       overlay.setGpsPosition(50.0, 8.0);
 
-      // Add data before showing
-      overlay.addRawGpsPoint(50.0, 8.0);
-      overlay.addRawGpsPoint(50.001, 8.001);
-      overlay.addFusedPoint(50.0, 8.0);
-      overlay.addAlignmentSnapshot(50.001, 8.001);
+      // Render before showing
+      overlay.render(sampleMapData());
 
       overlay.show();
 
@@ -516,7 +545,7 @@ describe('LeafletMapOverlay', () => {
       let layerCount = 0;
       map.eachLayer(() => layerCount++);
       // Tile layer + user marker + raw polyline + fused polyline +
-      // snapshot polyline = at least 5 layers
+      // snapshot polyline = at least 4 layers
       expect(layerCount).toBeGreaterThanOrEqual(4);
       overlay.dispose();
     });
@@ -526,8 +555,7 @@ describe('LeafletMapOverlay', () => {
       const { overlay } = createOverlay();
       overlay.setGpsPosition(50.0, 8.0);
       overlay.show();
-      overlay.addRawGpsPoint(50.0, 8.0);
-      overlay.addRawGpsPoint(50.001, 8.001);
+      overlay.render(sampleMapData());
 
       overlay.hide();
       overlay.show();
@@ -859,19 +887,29 @@ describe('LeafletMapOverlay', () => {
 
     /**
      * Why this test matters:
-     * The user-position marker must use VIS_COLORS.USER_POSITION.css
-     * instead of a hardcoded hex color.
+     * The user-position marker must use VIS_COLORS.USER_POSITION.css instead
+     * of a hardcoded hex color. Since Phase 3 the marker is drawn by the
+     * shared `map-overlay-draw` module, so the overlay itself must NOT
+     * re-introduce a hardcoded color, and the shared module must use the
+     * VIS_COLORS token.
      * See: 2026-04-01-code-review-dom-hardcoding-audit.md, Finding 4 (P6).
      */
     it('user marker uses VIS_COLORS instead of hardcoded color', async () => {
       const { readFileSync } = await import('node:fs');
       const { resolve } = await import('node:path');
-      const source = readFileSync(
+      const overlaySource = readFileSync(
         resolve(process.cwd(), 'src/visualization/leaflet-map-overlay.ts'),
         'utf-8'
       );
-      expect(source).not.toMatch(/background:#3b82f6/);
-      expect(source).toContain('VIS_COLORS.USER_POSITION.css');
+      // The overlay no longer draws the user marker itself.
+      expect(overlaySource).not.toMatch(/background:#3b82f6/);
+
+      const drawSource = readFileSync(
+        resolve(process.cwd(), 'src/visualization/map-overlay-draw.ts'),
+        'utf-8'
+      );
+      expect(drawSource).not.toMatch(/background:#3b82f6/);
+      expect(drawSource).toContain('VIS_COLORS.USER_POSITION.css');
     });
 
     /**

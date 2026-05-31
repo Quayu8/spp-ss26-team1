@@ -43,6 +43,7 @@ import {
   showSetupModal,
   updateRefPointButtonLabel,
   setNewRefPointButtonVisible,
+  updateTrackingQuality,
 } from './ui/hud';
 import {
   initSessionSummary,
@@ -57,6 +58,7 @@ import {
 } from './ui/log-panel';
 import { initToast, showToast, TOAST_DURATION_ERROR } from './ui/toast';
 import { destroyConfirmDialog } from './ui/confirm-dialog';
+import * as THREE from 'three';
 import {
   initAR,
   endARSession,
@@ -66,9 +68,12 @@ import {
   setTrackingLostCallback,
   setTrackingCallbacks,
   setTrackingRecoveredCallback,
+  setTrackingStore,
   getScene,
   getCamera,
   getArWorldGroup,
+  setScene,
+  setArWorldGroup,
   type CapturedImage,
   type DepthSample,
 } from 'gps-plus-slam-app-framework/ar/webxr-session';
@@ -77,6 +82,8 @@ import { applyChromiumProjectionLayerWorkaround } from 'gps-plus-slam-app-framew
 import {
   initStorage,
   resetForNewSession,
+  clearRefPointsCacheForAllScenarios,
+  getCurrentScenarioHandle,
 } from 'gps-plus-slam-app-framework/storage/file-system';
 import {
   getReadFolderHandle,
@@ -86,7 +93,11 @@ import {
 import { createRecordingSessionHandlers } from './recording/recording-session-handlers';
 import { createFolderManager } from './storage/folder-manager';
 
-import { type ImportedRefPoint } from './storage/ref-point-importer';
+import {
+  setImportedRefPointEntries,
+  selectImportedKnownAnchors,
+  type RefPointEntry,
+} from './state/ref-points-slice';
 
 import {
   showRefPointPicker,
@@ -112,10 +123,13 @@ import {
 import {
   checkAllPermissions,
   requestAllPermissions,
+  subscribePermissionChanges,
 } from 'gps-plus-slam-app-framework/sensors/permission-checker';
 
 import type { LatLong } from 'gps-plus-slam-app-framework/core';
 import { odometryTrackingRestarted } from 'gps-plus-slam-app-framework/core';
+import { createStoreRef } from './state/store-ref';
+import { subscribeHudToTrackingQuality } from './ui/hud-tracking-quality-subscriber';
 import { gpsEventVisualizer } from 'gps-plus-slam-app-framework/visualization/gps-event-markers';
 import { LeafletMapOverlay } from 'gps-plus-slam-app-framework/visualization/leaflet-map-overlay';
 import {
@@ -127,6 +141,10 @@ import {
   type AlignmentLerper,
 } from 'gps-plus-slam-app-framework/visualization/alignment-lerper';
 import { createGpsCompassCubes } from 'gps-plus-slam-app-framework/visualization/gps-compass-cubes';
+import { FrameTileVisualizer } from './visualization/frame-tile-visualizer';
+import { decodeFrameTexture } from './visualization/frame-texture-decoder';
+import { wireFrameTileSubscribers } from './visualization/wire-frame-tile-subscribers';
+import { FrameBlobCache } from './visualization/frame-blob-cache';
 
 import {
   initReplayUI,
@@ -174,8 +192,15 @@ function createNewStore() {
   });
 }
 
-// Global store instance with write failure callback
+// Global store instance with write failure callback.
+//
+// `storeRef` mirrors the same value but emits to subscribers on every swap.
+// Long-lived subscribers (e.g. the HUD tracking-quality subscriber, F1 fix
+// from 2026-05-26-tracking-quality-regression-and-replay-gaps-user-feedback.md)
+// must observe `storeRef` instead of capturing `store` in a closure, or they
+// silently freeze against the boot store after `Start Recording` / replay.
 let store = createNewStore();
+const storeRef = createStoreRef(store);
 
 // Current recording options (loaded at startup)
 let recordingOptions: RecordingOptions;
@@ -189,11 +214,37 @@ let cameraFollower: CameraFollower | null = null;
 // Issue 4: Alignment lerper — smooths alignment-matrix transitions
 let alignmentLerper: AlignmentLerper | null = null;
 
+// F3.5d — live frame-tile visualization. The recorder caches every captured
+// frame blob in memory keyed by its `frames/<filename>` path, so the
+// FrameTileVisualizer can paint the same textures the replay path uses.
+// The wirer subscribes to `selectFrameTilesInWebXR` (memoised over
+// `state.gpsData.odometryPath.points`), and FrameTileVisualizer.addTile
+// reads the blob out of this cache. Cleared on `resetMainState`.
+//
+// Step 7 of the 2026-05-27 slice-collapse plan: bounded by an LRU byte
+// cap so multi-hour outdoor sessions don't accumulate every JPEG in RAM
+// (review §E). The wirer processes frames tail-first and never re-reads a
+// blob once its tile is decoded, so evicting cold/old blobs is safe.
+const LIVE_FRAME_BLOB_CACHE_MAX_BYTES = 64 * 1024 * 1024; // 64 MiB
+const liveFrameBlobs = new FrameBlobCache({
+  maxBytes: LIVE_FRAME_BLOB_CACHE_MAX_BYTES,
+});
+let frameTileVisualizer: FrameTileVisualizer | null = null;
+let unsubscribeFrameTiles: (() => void) | null = null;
+
+// HUD tracking-quality subscription. `subscribeHudToTrackingQuality` returns a
+// dispose function that detaches both the per-store subscription and the
+// store-swap listener. We keep the handle here so re-entering AR (back to
+// setup → Enter AR again) and `resetMainState` can tear it down instead of
+// leaking an extra subscriber on every cycle.
+let unsubscribeTrackingQuality: (() => void) | null = null;
+
 // Replay mode handlers — encapsulates all replay state and event handlers
 // (Finding #7 decomposition: extracted from main.ts to replay/replay-handlers.ts)
 const replayHandlers = createReplayHandlers({
   setStore: (newStore) => {
     store = newStore;
+    storeRef.set(newStore);
   },
 });
 
@@ -203,11 +254,12 @@ const recordingSessionHandlers = createRecordingSessionHandlers({
   getStore: () => store,
   setStore: (newStore) => {
     store = newStore;
+    storeRef.set(newStore);
   },
+  setTrackingStore,
   createNewStore,
   getRecordingOptions: () => recordingOptions,
   getMapOverlay: () => mapOverlay,
-  clearRefPointUsage: () => refPointHandlers.clearSessionRefPointUsage(),
   getSessionNotes,
   waitForZeroReference,
   loadAndDisplayRefPoints: (handle) =>
@@ -236,8 +288,6 @@ const folderManager = createFolderManager({
   getIsReplayMode: () => replayHandlers.getIsReplayMode(),
   setReplayZipScenariosCache: (cache) =>
     replayHandlers.setReplayZipScenariosCache(cache),
-  setImportedRefPoints: (refPoints) =>
-    refPointHandlers.setImportedRefPoints(refPoints),
   showError,
   updateStatus,
   populateScenarios,
@@ -258,22 +308,42 @@ const folderManager = createFolderManager({
 // --- Exported for testing ---
 
 /**
- * Get imported reference points from previous session ZIPs.
- * Used by the ref point picker to suggest existing ref points.
- * Exported for testing purposes.
+ * Get imported reference points from the V2 slice.
+ * Returns one entry per sidecar-imported known anchor (timestamp === 0).
+ * Exported for testing.
  */
-export function getImportedRefPoints(): ImportedRefPoint[] {
-  return refPointHandlers.getImportedRefPoints();
+export function getImportedRefPoints() {
+  return selectImportedKnownAnchors(store.getState().refPoints);
 }
 
 /**
- * Set imported reference points (for testing purposes).
- * Delegates to refPointHandlers.
+ * Replace the imported ref-point set wholesale (for testing).
+ * Dispatches `setImportedRefPointEntries` into the V2 slice. Each input
+ * becomes a `RefPointEntry` with `timestamp: 0` (sidecar marker).
  */
 export function setImportedRefPointsForTesting(
-  refPoints: ImportedRefPoint[]
+  refPoints: ReadonlyArray<{
+    id: string;
+    name?: string;
+    lat: number;
+    lon: number;
+    alt?: number;
+    sourceZipName?: string;
+  }>
 ): void {
-  refPointHandlers.setImportedRefPoints(refPoints);
+  const entries: RefPointEntry[] = refPoints.map((rp) => ({
+    id: rp.id,
+    timestamp: 0,
+    name: rp.name,
+    rawGpsPoint: {
+      id: `imported-${rp.id}`,
+      latitude: rp.lat,
+      longitude: rp.lon,
+      ...(rp.alt !== undefined ? { altitude: rp.alt } : {}),
+      timestamp: 0,
+    },
+  }));
+  store.dispatch(setImportedRefPointEntries(entries));
 }
 
 /**
@@ -309,6 +379,23 @@ export function resetMainState(): void {
     alignmentLerper.dispose();
     alignmentLerper = null;
   }
+  // Tear down the HUD tracking-quality subscription so it doesn't outlive the
+  // AR session (prevents accumulating subscribers across enter-AR cycles).
+  if (unsubscribeTrackingQuality) {
+    unsubscribeTrackingQuality();
+    unsubscribeTrackingQuality = null;
+  }
+  // F3.5d — tear down frame-tile visualizer + drop cached frame blobs so
+  // GPU textures and JPEG bytes don't outlive the AR session.
+  if (unsubscribeFrameTiles) {
+    unsubscribeFrameTiles();
+    unsubscribeFrameTiles = null;
+  }
+  if (frameTileVisualizer) {
+    frameTileVisualizer.dispose();
+    frameTileVisualizer = null;
+  }
+  liveFrameBlobs.clear();
   recordingSessionHandlers.reset();
   refPointHandlers.reset();
   destroyConfirmDialog();
@@ -334,6 +421,55 @@ export function loadAndDisplayRefPoints(
   handle: FileSystemDirectoryHandle
 ): Promise<{ refPointCount: number; observationCount: number }> {
   return folderManager.loadAndDisplayRefPoints(handle);
+}
+
+/**
+ * Clear the cached ref-point definitions across all OPFS scenarios so that
+ * the next scenario load re-imports them from the read folder's *.zip
+ * recordings. If a scenario is currently selected, immediately reload its
+ * ref points so the user sees the freshly imported state without leaving
+ * the start screen.
+ *
+ * Wired to the "Clear Reference Point Cache" button in the settings modal
+ * (confirm dialog handled by settings-modal.ts).
+ */
+export async function handleClearRefPointCache(): Promise<void> {
+  try {
+    const result = await clearRefPointsCacheForAllScenarios();
+
+    // If a scenario is already selected, force a re-import so the visualizers
+    // and the H3 cache reflect the cleared state immediately.
+    const currentHandle = getCurrentScenarioHandle();
+    if (currentHandle) {
+      try {
+        await folderManager.loadAndDisplayRefPoints(currentHandle);
+      } catch (err) {
+        log.warn('Re-import after cache clear failed:', err);
+        // Re-import failed — clear in-memory imported ref points so proximity
+        // checks don't keep referring to stale entries from before the cache
+        // was cleared.
+        store.dispatch(setImportedRefPointEntries([]));
+      }
+    } else {
+      // No active scenario — clear in-memory imported ref points so any
+      // proximity checks don't keep referring to stale entries.
+      store.dispatch(setImportedRefPointEntries([]));
+    }
+
+    const cleared = result.scenariosCleared;
+    const errs = result.errors.length;
+    const message =
+      errs > 0
+        ? `⚠️ Cleared ref-point cache for ${cleared} scenario${cleared === 1 ? '' : 's'} (${errs} failed)`
+        : cleared === 0
+          ? 'No cached ref points to clear'
+          : `✅ Cleared ref-point cache for ${cleared} scenario${cleared === 1 ? '' : 's'}`;
+    showToast(message);
+    log.info(message, result);
+  } catch (err) {
+    log.error('Failed to clear ref-point cache:', err);
+    showError('Failed to clear ref-point cache — see logs');
+  }
 }
 
 /**
@@ -383,6 +519,7 @@ export async function resetForNewRecording(): Promise<void> {
 
   // Fresh store for next session
   store = createNewStore();
+  storeRef.set(store);
 
   // --- Reset storage (preserve OPFS root, clear session handles) ---
   resetForNewSession();
@@ -404,12 +541,14 @@ export async function resetForNewRecording(): Promise<void> {
     // is true, but we guard to satisfy TypeScript and tolerate future refactors.
     const folderHandle = getReadFolderHandle();
     if (folderHandle) {
-      const refPointCount = refPointHandlers.getImportedRefPoints().length;
+      const refPointCount = selectImportedKnownAnchors(
+        store.getState().refPoints
+      ).length;
       updateFolderStatus(`✅ ${folderHandle.name} (${refPointCount} ref pts)`);
     }
   } else {
     // Permission lost — clear imported ref points too since they came from that folder
-    refPointHandlers.setImportedRefPoints([]);
+    store.dispatch(setImportedRefPointEntries([]));
   }
 
   log.info(
@@ -524,10 +663,13 @@ async function main(): Promise<void> {
 
   // Initialize settings modal with callback to update options
   // This must happen early so settings button works even if WebXR fails
-  initSettingsModal((newOptions) => {
-    recordingOptions = newOptions;
-    log.info('Recording options updated:', recordingOptions);
-  });
+  initSettingsModal(
+    (newOptions) => {
+      recordingOptions = newOptions;
+      log.info('Recording options updated:', recordingOptions);
+    },
+    () => handleClearRefPointCache()
+  );
 
   // Initialize ref point picker modal content BEFORE WebXR check
   // This allows E2E tests to work even without WebXR support
@@ -626,6 +768,17 @@ async function main(): Promise<void> {
   // This provides immediate feedback on what's available/needed
   const initialPermissions = await checkAllPermissions();
   updatePermissionStatus(initialPermissions);
+
+  // Subscribe to out-of-band permission changes so a user flipping
+  // location/camera in browser settings is reflected in the setup modal
+  // without requiring a page reload. See
+  // docs/2026-05-03-setup-screen-defaults-and-permission-rerequest.md (Issue 2).
+  subscribePermissionChanges((result) => {
+    updatePermissionStatus(result);
+    if (result.allMandatoryReady) {
+      updateStatus('Ready - Configure scenario');
+    }
+  });
 
   // Update status based on permission state
   if (!initialPermissions.webxr.supported) {
@@ -754,10 +907,11 @@ async function handleEnterAR(): Promise<void> {
     });
 
     // Wire tracking restart detection BEFORE initAR() — this enables the
-    // TrackingStateManager and XRReferenceSpace reset event listener.
+    // tracking slice and XRReferenceSpace reset event listener.
     // When tracking resumes after an origin reset (Case 2), the store's
     // odometryTrackingRestarted reducer clears stale data and accumulates
     // offsets so alignment continues correctly across resets.
+    setTrackingStore(store);
     setTrackingCallbacks((payload) => {
       store.dispatch(odometryTrackingRestarted(payload));
       updateArInfo('');
@@ -805,6 +959,29 @@ async function handleEnterAR(): Promise<void> {
 
       cameraFollower = createCameraFollower(arScene);
       createGpsCompassCubes(cameraFollower.object3D);
+
+      // F3.5d — wire the frame-tile visualizer into the live AR scene so
+      // captured frames appear as textured planes during recording, using
+      // the same listener+visualizer stack as replay. Best-effort: failures
+      // must not break the AR session.
+      try {
+        frameTileVisualizer = new FrameTileVisualizer(arScene);
+        unsubscribeFrameTiles = wireFrameTileSubscribers({
+          storeRef,
+          visualizer: frameTileVisualizer,
+          blobSource: (imageFile) =>
+            Promise.resolve(liveFrameBlobs.get(imageFile) ?? null),
+          decodeTexture: decodeFrameTexture,
+          onError: (err, imageFile) => {
+            log.warn(`Frame tile decode failed for "${imageFile}"`, err);
+          },
+        });
+      } catch (err) {
+        log.warn(
+          'Frame tile visualizer wiring skipped; recording continues without frame tiles',
+          err
+        );
+      }
     }
 
     // Issue #14: Map overlay is created lazily on first toggle (not here)
@@ -832,6 +1009,21 @@ async function handleEnterAR(): Promise<void> {
 
     // Issue #2 fix: Update status to match AR_READY state per Application State Machine
     updateStatus('AR active - Tap Start to record');
+
+    // Subscribe to tracking quality changes so the HUD reflects alignment
+    // health. Goes through `storeRef` so the subscription follows every
+    // store swap (Start Recording / replay) — see F1 in
+    // `docs/2026-05-26-tracking-quality-regression-and-replay-gaps-user-feedback.md`.
+    //
+    // Dispose any prior subscription first: `handleEnterAR` can run multiple
+    // times per page load (back to setup → Enter AR again), and each call
+    // would otherwise append a fresh `storeRef` + `store` subscriber that is
+    // never cleaned up, leaking memory and firing redundant HUD updates.
+    unsubscribeTrackingQuality?.();
+    unsubscribeTrackingQuality = subscribeHudToTrackingQuality({
+      storeRef,
+      updateHud: updateTrackingQuality,
+    });
 
     // Issue 7 Phase 2: Push AR screen state for back-button navigation
     pushScreenState('ar');
@@ -895,6 +1087,11 @@ function handleImageCaptured(image: CapturedImage): void {
   updateFrameCount(image.frameIndex);
 
   const filename = `frame-${String(image.frameIndex).padStart(6, '0')}.jpg`;
+
+  // F3.5d — cache the blob BEFORE dispatch so the frame-tile listener
+  // (F3.2) and visualizer (F3.5d wire-up) can resolve it synchronously
+  // when they react to the add2dImage action.
+  liveFrameBlobs.set(`frames/${filename}`, image.blob);
 
   // Dispatch first to preserve chronological action order (see DESIGN NOTE above)
   // Raw WebXR position — the reducer applies WebXR→NUE conversion
@@ -1096,6 +1293,31 @@ if (
     setGpsEventVisualizerZeroRef: (lat: number, lon: number) =>
       gpsEventVisualizer.setZeroRef({ lat, lon }),
     clearGpsEventVisualizer: () => gpsEventVisualizer.clearAll(),
+    /**
+     * §3c — Add a GPS event with optional accuracy directly to the
+     * visualizer. Ensures an offline `THREE.Scene` + `arWorldGroup` exist
+     * (Playwright tests don't have an active WebXR session). Idempotent —
+     * subsequent calls reuse the same offline scene.
+     */
+    addGpsEventForTest: (
+      gpsCoords: [number, number, number],
+      odomPosition: [number, number, number],
+      accuracy?: { horizontal?: number; vertical?: number }
+    ) => {
+      if (!getScene()) {
+        setScene(new THREE.Scene());
+      }
+      if (!getArWorldGroup()) {
+        const grp = new THREE.Group();
+        getScene()?.add(grp);
+        setArWorldGroup(grp);
+      }
+      gpsEventVisualizer.addGpsEvent(gpsCoords, odomPosition, accuracy);
+    },
+    getRawGpsMarkerWorldSizes: () =>
+      gpsEventVisualizer.getRawMarkerWorldSizes(),
+    // Tracking quality indicator hook
+    updateTrackingQuality,
     // Mandatory storage selection hooks (Task 1a-fix)
     setFolderSelected,
     setSaveLocationSelected,

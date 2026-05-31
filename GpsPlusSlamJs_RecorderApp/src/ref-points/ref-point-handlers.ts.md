@@ -17,15 +17,11 @@ Factory that creates ref-point handlers with injected dependencies.
 
 **`RefPointHandlers`** returned object:
 
-| Method                      | Signature                                 | Description                                                                               |
-| --------------------------- | ----------------------------------------- | ----------------------------------------------------------------------------------------- |
-| `handleMarkRefPoint`        | `() => Promise<void>`                     | Full mark-ref-point flow: validate → picker → build → persist → visualize.                |
-| `checkNearbyRefPoint`       | `(lat, lng) => string \| undefined`       | Check if (lat,lng) is near a known imported ref point. Returns display name or undefined. |
-| `getImportedRefPoints`      | `() => ImportedRefPoint[]`                | Returns the current imported ref-points array.                                            |
-| `setImportedRefPoints`      | `(refPoints: ImportedRefPoint[]) => void` | Replaces the imported ref-points array.                                                   |
-| `getSessionRefPointUsage`   | `() => Map<string, number>`               | Returns the per-session ref-point usage counter map.                                      |
-| `clearSessionRefPointUsage` | `() => void`                              | Clears the usage map (called at recording start).                                         |
-| `reset`                     | `() => void`                              | Clears all state (ref-points, guard flag, usage map).                                     |
+| Method                | Signature                           | Description                                                                                                          |
+| --------------------- | ----------------------------------- | -------------------------------------------------------------------------------------------------------------------- |
+| `handleMarkRefPoint`  | `() => Promise<void>`               | Full mark-ref-point flow: validate → picker → build → persist → visualize.                                           |
+| `checkNearbyRefPoint` | `(lat, lng) => string \| undefined` | Check if (lat,lng) is near a known imported ref point. Returns display name or undefined.                            |
+| `reset`               | `() => void`                        | Clears the concurrent-call guard and re-observation cooldown map, and dispatches `resetRefPoints` into the V2 slice. |
 
 ## Invariants & Assumptions
 
@@ -34,7 +30,9 @@ Factory that creates ref-point handlers with injected dependencies.
 - **Re-observation toast feedback** (Finding 3, `2026-04-29-ref-points-user-feedback.md`): the single-click re-observation branch is silent for the user (no picker is shown). After the OPFS persist resolves successfully and `nearbyMatch` is set, `handleMarkRefPoint` calls `showToast(`Re-observed "<name>"`, { severity: 'info' })`. The toast is **never** fired on the picker-driven new-ref-point path (the picker UI itself is the feedback), on cooldown rejections (silent by design), or when the OPFS write fails (the existing `showError` channel handles failure feedback).
 - **`persistRefPointObservation` returns `boolean`**: `true` on successful save, `false` on caught error (after `showError` is invoked). The return value gates the re-observation toast so the toast reflects the durable end state.
 - **Picker-visible guard**: Returns early if the ref-point picker is already visible.
-- **Raw-storage pattern**: `dispatchRefPointAction` destructures a full `GpsPoint` to extract only `RawGpsPoint` fields, dispatching `{ rawGpsPoint }` instead of `{ gpsPoint }`. The library reducer computes derived fields when building state.
+- **Raw-storage pattern**: `dispatchRefPointAction` destructures a full `GpsPoint` to extract only `RawGpsPoint` fields, dispatching `{ rawGpsPoint }` on the V2 `addRefPointEntry` action. When alignment is in effect the fused-at-mark-time snapshot is included as `{ gpsPoint }`; otherwise the field is omitted and consumers fall back to `rawGpsPoint`.
+- **Action log is canonical; the OPFS sidecar is a cache (plan §A.2)**: every live mark writes the `refPoints/addRefPointEntry` action as the authoritative record; the per-scenario H3 sidecar JSON is a secondary cache write derived from the post-replay in-memory state. At startup the sidecar is hydrated _first_ via `setImportedRefPointEntries` (which replaces the array, so it must run before any action-log replay), then the session's own action log is replayed on top via `addRefPointEntry`. If the sidecar and action log disagree for a cell, the action-log observation wins — it survives into post-startup state and the sidecar is rewritten from that state on the next mark. The conflict rule is pinned by the `conflict rule: sidecar vs action log` block in [ref-points-selectors.test.ts](ref-points-selectors.test.ts).
+- **Single source of truth (Step 5.7 of the [2026-05-27 slice-collapse plan](../../../../gps-plus-slam/GpsPlusSlamJs_Docs/docs/2026-05-27-collapse-refpoint-and-frame-slices-plan.md))**: only `refPoints/addRefPointEntry` is dispatched at mark time. The previously-parallel `gpsData/markReferencePoint` dispatch (and its `MarkReferencePointPayload.alignmentMatrix` handoff) was dropped — fusion is now resolved directly inside `dispatchRefPointAction` via `fusedGpsFromOdom` so the V2 payload already carries the resolved `gpsPoint`. Legacy zips remain replayable via the Step 5.6 action-loader translator.
 - The factory's `deps.getStore()` / `deps.getCurrentSessionName()` are called lazily (at handler invocation time), so they always reflect the latest app state.
 - All other dependencies (AR, file-system, picker, HUD, store actions) are direct imports — same modules they were in `main.ts`. Visualization is **not** called directly from this module any more: `visualizeRefPoint` dispatches `addCurrentRefPointMark` into the slice, and the visualizer subscribes via `wireStoreSubscribers` (Finding 5, [docs/2026-04-30-refpoint-marks-into-redux-plan.md](../../../GpsPlusSlamJs_Docs/docs/2026-04-30-refpoint-marks-into-redux-plan.md)).
 - `reset()` does **not** interact with the store — the caller manages store lifecycle.
@@ -57,16 +55,19 @@ const refPointHandlers = createRefPointHandlers({
 initUI({ onMarkRefPoint: () => refPointHandlers.handleMarkRefPoint() });
 
 // On new recording
-refPointHandlers.clearSessionRefPointUsage();
+// (per-session usage tracking was removed in 5.7a-3 Option C.)
 
 // On folder open with ref-points
-refPointHandlers.setImportedRefPoints(importResult.refPoints);
+// (sidecar imports now dispatch `setImportedRefPointEntries` directly
+//  into the `refPoints` slice; folder-manager owns this wiring.)
 
 // On app reset
 refPointHandlers.reset();
 ```
 
+- **Single source of truth (5.7a-3 Option C of the [2026-05-27 slice-collapse plan](../../../../gps-plus-slam/GpsPlusSlamJs_Docs/docs/2026-05-27-collapse-refpoint-and-frame-slices-plan.md))**: known anchors live exclusively in the flat `refPoints` slice. `handleMarkRefPoint` and `checkNearbyRefPoint` read via `selectKnownAnchorsByCell(state.refPoints)`. The legacy `refPoints` slice is no longer written by production code; per-session usage tracking and `incrementRefPointUsage` were dropped because the picker is now always called with an empty `existingIds` list (H3 IDs are meaningless to users) so no usage column is rendered.
+
 ## Tests
 
-- **`ref-point-handlers.test.ts`** — 54 unit tests covering factory creation, state management, validation guards, picker integration, observation building (including fusedGpsPoint computation with altitude propagation), persistence, visualization (including current-session fused-preference), concurrent-call prevention, H3-based IDs, proximity detection, re-observation cooldown (10s per H3 cell), and full end-to-end flow.
+- **`ref-point-handlers.test.ts`** — 67 unit tests covering factory creation, state management, validation guards, picker integration, observation building (including fusedGpsPoint computation with altitude propagation), persistence, visualization (including current-session fused-preference), concurrent-call prevention, H3-based IDs, proximity detection, re-observation cooldown (10s per H3 cell), and full end-to-end flow. Step 5.4 adds a `handleMarkRefPoint — Step 5.4 matcher source` block that proves the matcher resolves via `refPoints` even when legacy `importedRefPoints` is empty. Step 5.7 dropped the parallel `gpsData/markReferencePoint` dispatch — the dispatch-assertion helpers (`getMarkCalls`, `getLastV2Payload`, `expectMarkDispatchedTimes`) now read the V2 dispatch stream off the mock store directly.
 - Key mock pattern: all external deps are mocked via `vi.hoisted()` + `vi.mock()`. Mock return values must be explicitly reset in every `beforeEach` because `vi.clearAllMocks()` does not reset `mockReturnValue` / `mockResolvedValue`.

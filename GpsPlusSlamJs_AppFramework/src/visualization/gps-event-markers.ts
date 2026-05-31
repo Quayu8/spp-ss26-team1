@@ -30,6 +30,67 @@ const GPS_MARKER_RADIUS = 0.08;
 const SNAPSHOT_MARKER_RADIUS = 0.1;
 
 /**
+ * Default opacity for the yellow raw-GPS sphere when it is rendered at the
+ * legacy fixed 8 cm radius (no accuracy passed). Matches the original 30 %
+ * value so live recording sessions look unchanged.
+ */
+const RAW_GPS_FIXED_OPACITY = 0.3;
+
+/**
+ * Reduced opacity for the yellow raw-GPS sphere when it is scaled by GPS
+ * accuracy (replay mode). At metre-scale ellipsoids the sphere can land on
+ * top of the cyan fused / red snapshot markers; a lower alpha keeps those
+ * smaller markers visible inside the ellipsoid.
+ */
+const RAW_GPS_ACCURACY_OPACITY = 0.13;
+
+/**
+ * Optional GPS-accuracy hints used by {@link GpsEventVisualizer.addGpsEvent}
+ * to render the raw-GPS marker as a non-uniform-scaled ellipsoid.
+ *
+ * Both fields are optional — missing or non-positive values fall back to the
+ * legacy fixed 8 cm sphere (same defensive policy as `preview-map.ts`).
+ */
+export interface GpsEventAccuracy {
+  /** Horizontal 1σ accuracy in metres (applied to both X and Z axes). */
+  horizontal?: number;
+  /** Vertical 1σ accuracy in metres (applied to the Y axis). */
+  vertical?: number;
+}
+
+/**
+ * Validate a {@link GpsEventAccuracy} hint and return the concrete
+ * {horizontal, vertical} scale when both axes are usable, or `null` to signal
+ * "fall back to the legacy fixed 8 cm sphere". A half-populated, non-positive,
+ * or non-finite (`NaN`/`Infinity`) accuracy must NOT produce an ellipsoid:
+ * a degenerate or infinite axis would corrupt the mesh transform and can
+ * crash Three.js rendering.
+ */
+function resolveEllipsoidScale(
+  accuracy: GpsEventAccuracy | undefined
+): { horizontal: number; vertical: number } | null {
+  // `== null` catches BOTH `undefined` and `null`. Although the parameter type
+  // forbids `null`, this is exported library API: a non-TS caller (or a
+  // nullable API response forwarded verbatim) could pass `null`, and
+  // destructuring `null` on the next line would throw a TypeError. Reject it
+  // here and fall back to the legacy fixed sphere — same defensive stance as
+  // the NaN/Infinity/half-populated guards below.
+  if (accuracy == null) return null;
+  const { horizontal, vertical } = accuracy;
+  // `typeof === 'number'` narrows `number | undefined` to `number`, so the
+  // finite/range checks below operate on a non-nullable value without any
+  // `!` assertions.
+  if (typeof horizontal !== 'number' || typeof vertical !== 'number') {
+    return null;
+  }
+  if (!Number.isFinite(horizontal) || !Number.isFinite(vertical)) {
+    return null;
+  }
+  if (horizontal <= 0 || vertical <= 0) return null;
+  return { horizontal, vertical };
+}
+
+/**
  * Manager for GPS event visualization
  */
 export class GpsEventVisualizer {
@@ -63,8 +124,18 @@ export class GpsEventVisualizer {
    *
    * @param gpsCoords - GPS position as [x, y, z] meters from zero reference
    * @param odomPosition - AR odometry position at the time of GPS reading
+   * @param accuracy - Optional 1σ GPS accuracy. When both fields are positive,
+   *   the raw-GPS marker is rendered as a non-uniform-scaled ellipsoid:
+   *   `mesh.scale.set(horizontal, vertical, horizontal)` over a unit sphere.
+   *   When missing, zero, or negative, the marker falls back to the legacy
+   *   fixed 8 cm sphere (same defensive policy as `preview-map.ts`).
+   *   Cyan fused and red snapshot markers are never affected by this argument.
    */
-  addGpsEvent(gpsCoords: Vector3, odomPosition: Vector3): void {
+  addGpsEvent(
+    gpsCoords: Vector3,
+    odomPosition: Vector3,
+    accuracy?: GpsEventAccuracy
+  ): void {
     if (!this.zeroRef) {
       log.warn('No zero reference set');
       return;
@@ -78,13 +149,33 @@ export class GpsEventVisualizer {
 
     const eventId = this.eventCounter++;
 
-    // Create raw GPS marker (yellow) at GPS coordinates — added to scene root
+    // Defensive: only treat accuracy as usable when BOTH axes are present and
+    // strictly positive. Otherwise fall back to the fixed 8 cm sphere so a
+    // half-populated accuracy field can't produce a degenerate ellipsoid.
+    const ellipsoidScale = resolveEllipsoidScale(accuracy);
+
+    // Create raw GPS marker (yellow) at GPS coordinates — added to scene root.
+    // Replay-mode ellipsoid uses a unit-radius sphere scaled non-uniformly;
+    // legacy recording-mode marker uses the fixed 8 cm radius.
     const rawMesh = this.createMarkerMesh(
       VIS_COLORS.RAW_GPS.hex,
       'raw-gps',
-      eventId
+      eventId,
+      ellipsoidScale ? 1 : GPS_MARKER_RADIUS,
+      ellipsoidScale ? RAW_GPS_ACCURACY_OPACITY : RAW_GPS_FIXED_OPACITY
     );
     rawMesh.position.set(gpsCoords[0], gpsCoords[1], gpsCoords[2]);
+    if (ellipsoidScale) {
+      rawMesh.scale.set(
+        ellipsoidScale.horizontal,
+        ellipsoidScale.vertical,
+        ellipsoidScale.horizontal
+      );
+      // Render large translucent ellipsoids before smaller markers so the
+      // cyan / red spheres remain visible inside them. Negative renderOrder
+      // pushes these to the front of the transparent draw queue.
+      rawMesh.renderOrder = -1;
+    }
     scene.add(rawMesh);
     this.rawGpsMarkers.push(rawMesh);
 
@@ -195,6 +286,27 @@ export class GpsEventVisualizer {
       fused: this.fusedMarkers.length,
       snapshots: this.snapshotMarkers.length,
     };
+  }
+
+  /**
+   * Diagnostic accessor: returns the world-space size (`THREE.Box3.setFromObject`)
+   * of each raw-GPS marker, in insertion order.
+   *
+   * Used by the rec31 accuracy-ellipsoid Playwright spec (§3c) to verify the
+   * relative scaling of two events with different `latLongAccuracy`. This is
+   * the size of the rendered ellipsoid in scene units (= metres in replay
+   * mode), not the underlying geometry radius — so it correctly reflects the
+   * `mesh.scale.set(h, v, h)` applied for accuracy-aware markers.
+   *
+   * @returns array of `{ x, y, z }` sizes — empty array if there are no markers.
+   */
+  getRawMarkerWorldSizes(): Array<{ x: number; y: number; z: number }> {
+    const tmpBox = new THREE.Box3();
+    return this.rawGpsMarkers.map((mesh) => {
+      tmpBox.setFromObject(mesh);
+      const size = tmpBox.getSize(new THREE.Vector3());
+      return { x: size.x, y: size.y, z: size.z };
+    });
   }
 }
 

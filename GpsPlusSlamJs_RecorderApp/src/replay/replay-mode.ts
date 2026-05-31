@@ -15,10 +15,6 @@
  */
 
 import {
-  loadActionsFromZip,
-  loadSessionMetadata,
-} from 'gps-plus-slam-app-framework/storage/zip-reader';
-import {
   createRecorderStore,
   type RecorderStore,
 } from '../state/recorder-store';
@@ -35,6 +31,7 @@ import {
   getAlignmentLerper,
 } from 'gps-plus-slam-app-framework/ar/replay-scene';
 import { wireStoreSubscribers } from 'gps-plus-slam-app-framework/state/store-subscribers';
+import type { MapData } from 'gps-plus-slam-app-framework/visualization/map-data';
 import { wireRefPointSubscribers } from '../state/ref-point-subscribers';
 import { gpsEventVisualizer } from 'gps-plus-slam-app-framework/visualization/gps-event-markers';
 import { refPointVisualizer } from '../visualization/ref-point-visualizer';
@@ -44,7 +41,12 @@ import {
   nueQuaternionToWebXR,
 } from 'gps-plus-slam-app-framework/ar/webxr-session';
 import { createLogger } from 'gps-plus-slam-app-framework/utils/logger';
-import { migrateActionsIfNeeded } from '../storage/recording-migration.js';
+import { loadRecording } from '../storage/recording-loader.js';
+import { createStoreRef } from '../state/store-ref';
+import { FrameTileVisualizer } from '../visualization/frame-tile-visualizer';
+import { decodeFrameTexture } from '../visualization/frame-texture-decoder';
+import { wireFrameTileSubscribers } from '../visualization/wire-frame-tile-subscribers';
+import { createZipFrameBlobSource } from '../storage/zip-frame-blob-source';
 import * as THREE from 'three';
 
 const log = createLogger('ReplayMode');
@@ -71,9 +73,7 @@ interface ReplayModeConfig {
  */
 interface ReplayMapOverlay {
   setGpsPosition: (lat: number, lon: number) => void;
-  addRawGpsPoint?: (lat: number, lon: number) => void;
-  addFusedPoint?: (lat: number, lon: number) => void;
-  addAlignmentSnapshot?: (lat: number, lon: number) => void;
+  render?: (data: MapData) => void;
   addCurrentMarker?: (lat: number, lon: number, name: string) => void;
 }
 
@@ -118,17 +118,12 @@ export async function startReplayMode(
 ): Promise<ReplayModeController> {
   log.info('Starting replay mode...');
 
-  // R8: Load actions from zip
-  const [zipEntries, sessionMetadata] = await Promise.all([
-    loadActionsFromZip(zipData),
-    loadSessionMetadata(zipData),
-  ]);
-  const rawActions: ReplayAction[] = zipEntries.map((e) => e.action);
-  // Migrate old recordings (pre-NUE convention) to the current coordinate frame
-  const actions = migrateActionsIfNeeded(
-    rawActions,
-    sessionMetadata
-  ) as ReplayAction[];
+  // R8: Load + migrate the recording through the canonical version-transparent
+  // loader. `loadRecording` parses session metadata, migrates actions to the
+  // current schema, and exposes a memoised final state — replay only needs
+  // the migrated action list, which it forwards to the ReplayEngine.
+  const recording = await loadRecording(zipData);
+  const actions: ReplayAction[] = recording.actions.map((e) => e.action);
   log.info(`Loaded ${actions.length} actions from zip`);
 
   // Create store with NullStorageBackend (no persistence side effects)
@@ -137,8 +132,35 @@ export async function startReplayMode(
   });
 
   // Initialize Three.js replay scene (no WebXR)
-  initReplayScene(config.container);
+  const replaySceneState = initReplayScene(config.container);
   log.info('Replay scene initialized');
+
+  // F3.5 — wire frame-tile visualization for add2dImage actions so the
+  // 2D camera frames recorded during the original session reappear as
+  // textured planes in the replay scene. Failure here (e.g. zip lacks a
+  // frames/ subdir) must not crash replay, so the whole wire-up is
+  // best-effort.
+  let unsubscribeFrameTiles: (() => void) | null = null;
+  let frameTileVisualizer: FrameTileVisualizer | null = null;
+  try {
+    const blobSource = await createZipFrameBlobSource(zipData);
+    frameTileVisualizer = new FrameTileVisualizer(replaySceneState.scene);
+    const storeRef = createStoreRef(store);
+    unsubscribeFrameTiles = wireFrameTileSubscribers({
+      storeRef,
+      visualizer: frameTileVisualizer,
+      blobSource,
+      decodeTexture: decodeFrameTexture,
+      onError: (err, imageFile) => {
+        log.warn(`Frame tile decode failed for "${imageFile}"`, err);
+      },
+    });
+  } catch (err) {
+    log.warn(
+      'Frame tile visualizer wiring skipped; replay continues without frame tiles',
+      err
+    );
+  }
 
   // Get the alignment lerper (Issue 4) — store subscribers route alignment
   // updates through the lerper for smooth interpolation instead of snapping.
@@ -151,14 +173,8 @@ export async function startReplayMode(
     setGpsPosition(lat: number, lon: number): void {
       mapOverlayTarget?.setGpsPosition(lat, lon);
     },
-    addRawGpsPoint(lat: number, lon: number): void {
-      mapOverlayTarget?.addRawGpsPoint?.(lat, lon);
-    },
-    addFusedPoint(lat: number, lon: number): void {
-      mapOverlayTarget?.addFusedPoint?.(lat, lon);
-    },
-    addAlignmentSnapshot(lat: number, lon: number): void {
-      mapOverlayTarget?.addAlignmentSnapshot?.(lat, lon);
+    render(data: MapData): void {
+      mapOverlayTarget?.render?.(data);
     },
     addCurrentMarker(lat: number, lon: number, name: string): void {
       mapOverlayTarget?.addCurrentMarker?.(lat, lon, name);
@@ -272,6 +288,8 @@ export async function startReplayMode(
       engine.dispose();
       unsubscribe();
       unsubscribeRefPoints();
+      unsubscribeFrameTiles?.();
+      frameTileVisualizer?.dispose();
       disposeReplayScene();
       log.info('Replay mode disposed');
     },

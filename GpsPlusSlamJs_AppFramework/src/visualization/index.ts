@@ -28,6 +28,27 @@ export {
   createGpsCompassCubes,
 } from './gps-compass-cubes.js';
 
+// --- frustum-visibility ---
+export {
+  buildCameraFrustum,
+  isObjectInCameraFrustum,
+  isPointInCameraFrustum,
+  isSphereInCameraFrustum,
+} from './frustum-visibility.js';
+
+// --- frame-conversions ---
+export { nueToArLocal } from './frame-conversions.js';
+
+// --- gps-anchor ---
+export {
+  type GpsAnchor,
+  type GpsAnchorMode,
+  type GpsAnchorOptions,
+  type GpsAnchorPhase,
+  type GpsAnchorSamplePoint,
+  createGpsAnchor,
+} from './gps-anchor.js';
+
 // --- gps-event-markers ---
 export { GpsEventVisualizer, gpsEventVisualizer } from './gps-event-markers.js';
 
@@ -45,6 +66,31 @@ export {
 // --- lerp-utils ---
 export { DEFAULT_LERP_RATE, clampedAlpha } from './lerp-utils.js';
 
+// --- map-data (shared trajectory model) ---
+export { type MapData, type MapDataInput, buildMapData } from './map-data.js';
+
+// --- accuracy-circles (shared per-event GPS accuracy circles) ---
+export {
+  type AccuracyCircleSample,
+  ACCURACY_CIRCLE_FILL_OPACITY,
+  ACCURACY_CIRCLE_STROKE_OPACITY,
+  ACCURACY_CIRCLE_WEIGHT,
+  addAccuracyCircles,
+} from './accuracy-circles.js';
+
+// --- map-overlay-draw (shared trajectory drawing routine) ---
+export {
+  type DrawMapDataOptions,
+  type DrawnMapData,
+  RAW_GPS_COLOR,
+  FUSED_PATH_COLOR,
+  ALIGNMENT_SNAPSHOT_COLOR,
+  USER_POSITION_COLOR,
+  MAP_PATH_POLYLINE_WEIGHT,
+  MAP_PATH_POLYLINE_OPACITY,
+  drawMapData,
+} from './map-overlay-draw.js';
+
 // --- map-overlay ---
 export {
   DEFAULT_ZOOM,
@@ -56,13 +102,6 @@ export {
   tileXYToLatLon,
   MapOverlay,
 } from './map-overlay.js';
-
-// --- gps-anchored-mesh-manager ---
-export {
-  GpsAnchoredMeshManager,
-  type GpsAnchoredItem,
-  type GpsAnchoredMeshManagerOptions,
-} from './gps-anchored-mesh-manager.js';
 
 // --- three-dispose ---
 export {

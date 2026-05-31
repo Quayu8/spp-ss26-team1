@@ -19,6 +19,7 @@ import {
 import type { StorageBackend } from '../storage/storage-backend';
 import {
   createPersistenceMiddleware,
+  slicePrefixOf,
   type PersistenceMiddlewareOptions,
 } from './persistence-middleware';
 
@@ -51,7 +52,10 @@ const testGpsDataSlice = createSlice({
   },
 });
 
-function createTestStore(options: PersistenceMiddlewareOptions) {
+function createTestStore(
+  options: Omit<PersistenceMiddlewareOptions, 'persistedPrefixes'> &
+    Partial<Pick<PersistenceMiddlewareOptions, 'persistedPrefixes'>>
+) {
   return configureStore({
     reducer: {
       recording: testRecorderSlice.reducer,
@@ -61,7 +65,14 @@ function createTestStore(options: PersistenceMiddlewareOptions) {
       getDefaultMiddleware({
         serializableCheck: false,
         immutableCheck: false,
-      }).concat(createPersistenceMiddleware(options)),
+      }).concat(
+        createPersistenceMiddleware({
+          // Default to the framework's built-in persisted slices; individual
+          // tests override to assert the whitelist is data-driven.
+          persistedPrefixes: ['gpsData', 'recording'],
+          ...options,
+        })
+      ),
   });
 }
 
@@ -120,6 +131,61 @@ describe('Persistence Middleware', () => {
     );
   });
 
+  // Why: refPoints/ actions are the canonical mark log after the
+  // 2026-05-27 slice-collapse plan (Step 5.7a-3). The persistence layer
+  // must include them so live recordings replay marks correctly.
+  //
+  // NOTE: the production `refPoints` slice lives in the consuming
+  // RecorderApp, which depends on this framework — so this framework-side
+  // test cannot import it without inverting the dependency. It therefore
+  // asserts on the literal production action-type prefix (`refPoints/`).
+  // The end-to-end drift guard that wires the REAL slice and REAL
+  // middleware together lives in the recorder
+  // (`recorder-store.test.ts` → "should persist refPoints/ mark actions").
+  it('should persist refPoints/ actions during recording', () => {
+    const refPointsSlice = createSlice({
+      name: 'refPoints',
+      initialState: { entries: [] as unknown[] },
+      reducers: {
+        addRefPointEntry(state, action: PayloadAction<unknown>) {
+          state.entries.push(action.payload);
+        },
+      },
+    });
+
+    const store = configureStore({
+      reducer: {
+        recording: testRecorderSlice.reducer,
+        gpsData: testGpsDataSlice.reducer,
+        refPoints: refPointsSlice.reducer,
+      },
+      middleware: (getDefaultMiddleware) =>
+        getDefaultMiddleware({
+          serializableCheck: false,
+          immutableCheck: false,
+        }).concat(
+          createPersistenceMiddleware({
+            storageBackend: mockBackend,
+            persistedPrefixes: ['gpsData', 'recording', 'refPoints'],
+          })
+        ),
+    });
+
+    store.dispatch(testRecorderSlice.actions.startSession());
+    mockBackend.writeAction.mockClear();
+
+    store.dispatch(
+      refPointsSlice.actions.addRefPointEntry({
+        id: 'cell-1',
+        timestamp: 123,
+      })
+    );
+    expect(mockBackend.writeAction).toHaveBeenCalledWith(
+      expect.objectContaining({ type: 'refPoints/addRefPointEntry' }),
+      2
+    );
+  });
+
   // Why: recorder/ actions (except recordWriteFailure) are session metadata.
   it('should persist recorder/ actions during recording', () => {
     const store = createTestStore({ storageBackend: mockBackend });
@@ -163,7 +229,12 @@ describe('Persistence Middleware', () => {
         getDefaultMiddleware({
           serializableCheck: false,
           immutableCheck: false,
-        }).concat(createPersistenceMiddleware({ storageBackend: mockBackend })),
+        }).concat(
+          createPersistenceMiddleware({
+            storageBackend: mockBackend,
+            persistedPrefixes: ['gpsData', 'recording'],
+          })
+        ),
     });
 
     store.dispatch(testRecorderSlice.actions.startSession());
@@ -368,5 +439,96 @@ describe('Persistence Middleware', () => {
       expect.objectContaining({ type: 'recording/endSession' }),
       2 // index 2: startSession was 1
     );
+  });
+
+  // --- Derived-prefix contract (architecture review 2026-05-29 §5 P0) ---
+  //
+  // Why these tests matter: the persistence whitelist used to hard-code the
+  // slice prefixes (`gpsData/`, `refPoints/`, `recording/`) as string
+  // literals. That let the `refPointsV2/` → `refPoints/` rename silently
+  // drop every live mark from the recording stream. The whitelist is now
+  // DATA-DRIVEN via `persistedPrefixes`, which the store factory derives
+  // from the actual slices' action types (see `slicePrefixOf`). These
+  // tests pin that contract so a future rename cannot silently re-break it.
+
+  it('persists actions only for slices listed in persistedPrefixes', () => {
+    // A slice whose name is NOT in persistedPrefixes must be dropped even
+    // while recording; one that IS listed must be persisted. This proves
+    // the whitelist comes from the option, not a baked-in literal.
+    const includedSlice = createSlice({
+      name: 'gpsData',
+      initialState: 0,
+      reducers: { bump: (s) => s + 1 },
+    });
+    const excludedSlice = createSlice({
+      name: 'somethingElse',
+      initialState: 0,
+      reducers: { bump: (s) => s + 1 },
+    });
+
+    const store = configureStore({
+      reducer: {
+        recording: testRecorderSlice.reducer,
+        gpsData: includedSlice.reducer,
+        somethingElse: excludedSlice.reducer,
+      },
+      middleware: (getDefaultMiddleware) =>
+        getDefaultMiddleware({
+          serializableCheck: false,
+          immutableCheck: false,
+        }).concat(
+          createPersistenceMiddleware({
+            storageBackend: mockBackend,
+            persistedPrefixes: ['gpsData', 'recording'],
+          })
+        ),
+    });
+
+    store.dispatch(testRecorderSlice.actions.startSession());
+    mockBackend.writeAction.mockClear();
+
+    store.dispatch(includedSlice.actions.bump());
+    store.dispatch(excludedSlice.actions.bump());
+
+    expect(mockBackend.writeAction).toHaveBeenCalledWith(
+      expect.objectContaining({ type: 'gpsData/bump' }),
+      expect.any(Number)
+    );
+    expect(mockBackend.writeAction).not.toHaveBeenCalledWith(
+      expect.objectContaining({ type: 'somethingElse/bump' }),
+      expect.any(Number)
+    );
+  });
+
+  it('always excludes recordWriteFailure even when recording is whitelisted', () => {
+    const store = createTestStore({
+      storageBackend: mockBackend,
+      persistedPrefixes: ['gpsData', 'recording'],
+    });
+    store.dispatch(testRecorderSlice.actions.startSession());
+    mockBackend.writeAction.mockClear();
+
+    store.dispatch(testRecorderSlice.actions.recordWriteFailure());
+    expect(mockBackend.writeAction).not.toHaveBeenCalled();
+  });
+});
+
+describe('slicePrefixOf', () => {
+  // Why: this helper is the single point that turns a slice-owned action
+  // type into the prefix the whitelist matches on. Keeping it correct (and
+  // tested) is what lets call sites derive prefixes from real action
+  // creators instead of re-typing literals.
+  it('extracts the slice name from a namespaced action type', () => {
+    expect(slicePrefixOf('gpsData/setZeroPos')).toBe('gpsData');
+    expect(slicePrefixOf('refPoints/addRefPointEntry')).toBe('refPoints');
+    expect(slicePrefixOf('recording/recordWriteFailure')).toBe('recording');
+  });
+
+  it('returns the whole string when there is no slash', () => {
+    expect(slicePrefixOf('@@INIT')).toBe('@@INIT');
+  });
+
+  it('only splits on the first slash', () => {
+    expect(slicePrefixOf('a/b/c')).toBe('a');
   });
 });

@@ -65,6 +65,21 @@ describe('File System Storage', () => {
       const blob = new Blob(['test'], { type: 'image/jpeg' });
       await expect(writeFrame(blob, 0)).rejects.toThrow('No active session');
     });
+
+    /**
+     * Why this test matters:
+     * If the maintenance action is invoked before `initStorage()` succeeds
+     * (or in a browser without OPFS), silently returning a zero-count result
+     * would mislead the UI into reporting "No cached ref points to clear".
+     * Throwing surfaces the real failure to the existing showError channel.
+     */
+    it('clearRefPointsCacheForAllScenarios throws when storage not initialized', async () => {
+      const { clearRefPointsCacheForAllScenarios } =
+        await import('./file-system');
+      await expect(clearRefPointsCacheForAllScenarios()).rejects.toThrow(
+        /OPFS scenarios directory is unavailable/i
+      );
+    });
   });
 });
 
@@ -297,6 +312,65 @@ describe('File System Storage - Integration with Mocks', () => {
       await startSession('MyScenario');
 
       expect(getCurrentScenarioHandle()).not.toBeNull();
+    });
+  });
+
+  describe('clearRefPointsCacheForAllScenarios', () => {
+    /**
+     * Why these tests matter:
+     * The "Clear Reference Point Cache" maintenance action must wipe the
+     * `refPoints/` directory across every scenario so the next scenario
+     * load triggers a re-import from the read folder's *.zip recordings.
+     * Missing caches must not be reported as errors (common case for fresh
+     * scenarios).
+     */
+    beforeEach(async () => {
+      await initStorage();
+    });
+
+    it('reports zero scenarios when none exist', async () => {
+      const { clearRefPointsCacheForAllScenarios } =
+        await import('./file-system');
+
+      const result = await clearRefPointsCacheForAllScenarios();
+
+      expect(result.scenariosScanned).toBe(0);
+      expect(result.scenariosCleared).toBe(0);
+      expect(result.errors).toEqual([]);
+    });
+
+    it('removes refPoints/ directory from every scenario that has one', async () => {
+      const { clearRefPointsCacheForAllScenarios } =
+        await import('./file-system');
+
+      // Seed two scenarios with cached ref points
+      const scenarioA = await startSession('ScenarioA');
+      const scenarioB = await startSession('ScenarioB');
+      expect(scenarioA.scenarioPath).toContain('ScenarioA');
+      expect(scenarioB.scenarioPath).toContain('ScenarioB');
+
+      const handleA = await setCurrentScenario('ScenarioA');
+      const refPointsA = await handleA!.getDirectoryHandle('refPoints', {
+        create: true,
+      });
+      await refPointsA.getFileHandle('cell-1.json', { create: true });
+
+      const handleB = await setCurrentScenario('ScenarioB');
+      const refPointsB = await handleB!.getDirectoryHandle('refPoints', {
+        create: true,
+      });
+      await refPointsB.getFileHandle('cell-2.json', { create: true });
+
+      const result = await clearRefPointsCacheForAllScenarios();
+
+      expect(result.scenariosScanned).toBe(2);
+      // Mock removeEntry always succeeds, so both should be reported cleared.
+      expect(result.scenariosCleared).toBe(2);
+      expect(result.errors).toEqual([]);
+
+      // Verify the directories no longer have the refPoints/ entry.
+      const reA = await setCurrentScenario('ScenarioA');
+      await expect(reA!.getDirectoryHandle('refPoints')).rejects.toThrow();
     });
   });
 

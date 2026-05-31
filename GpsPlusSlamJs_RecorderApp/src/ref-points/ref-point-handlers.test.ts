@@ -40,7 +40,6 @@ const {
   mockUpdateStatus,
   mockShowToast,
   mockIsRefPointPickerVisible,
-  mockMarkReferencePoint,
   mockCalcGpsCoords,
   mockFusedGpsFromOdom,
 } = vi.hoisted(() => ({
@@ -73,10 +72,6 @@ const {
   mockUpdateStatus: vi.fn(),
   mockShowToast: vi.fn(),
   mockIsRefPointPickerVisible: vi.fn<() => boolean>().mockReturnValue(false),
-  mockMarkReferencePoint: vi.fn((payload: unknown) => ({
-    type: 'recording/markReferencePoint',
-    payload,
-  })),
   mockCalcGpsCoords: vi.fn().mockReturnValue({ lat: 49.123, lon: 8.456 }),
   mockFusedGpsFromOdom: vi.fn().mockReturnValue({ lat: 49.123, lon: 8.456 }),
 }));
@@ -101,7 +96,6 @@ vi.mock('../state/recorder-store', async () => {
   );
   return {
     ...actual,
-    markReferencePoint: mockMarkReferencePoint,
   };
 });
 
@@ -152,9 +146,53 @@ import {
   type RefPointHandlers,
   type RefPointHandlersDeps,
 } from './ref-point-handlers';
-import { refPointsReducer } from '../state/ref-points-slice';
+import {
+  refPointsReducer,
+  addRefPointEntry,
+  setImportedRefPointEntries,
+  type RefPointEntry,
+} from '../state/ref-points-slice';
+import { gpsToH3 } from 'gps-plus-slam-app-framework/geo/h3-proximity';
 
 // ── Helpers ────────────────────────────────────────────────────────────
+
+/**
+ * Module-level reference to the store created by the most recent
+ * `createMockStore()` call. Lets `seedImportedRefPoints` dispatch the
+ * V2 sidecar action without each test having to thread the store
+ * through. Set as a side effect of `createMockStore` below.
+ */
+let lastTestStore: RecorderStore | null = null;
+
+/**
+ * Test-only helper: seed the `refPoints` slice with sidecar-imported
+ * known anchors. Replaces the removed `handlers.setImportedRefPoints`
+ * convenience after 5.7a-3 Option C collapsed the legacy slice.
+ */
+function seedImportedRefPoints(refPoints: ImportedRefPoint[]): void {
+  if (!lastTestStore) {
+    throw new Error(
+      'seedImportedRefPoints: no test store has been created yet'
+    );
+  }
+  const entries = refPoints.map((rp) => importedToEntry(rp, Date.now()));
+  lastTestStore.dispatch(setImportedRefPointEntries(entries));
+}
+
+function importedToEntry(rp: ImportedRefPoint, ts: number): RefPointEntry {
+  return {
+    id: gpsToH3(rp.lat, rp.lon),
+    timestamp: ts,
+    name: rp.name,
+    rawGpsPoint: {
+      id: `gps-${rp.id}`,
+      latitude: rp.lat,
+      longitude: rp.lon,
+      altitude: rp.alt,
+      timestamp: ts,
+    },
+  };
+}
 
 function createMockStore(
   gpsPositions: GpsPoint[] = [],
@@ -174,55 +212,163 @@ function createMockStore(
       refPoints: refPointsState,
     })),
     subscribe: vi.fn().mockReturnValue(() => {}),
-    dispatch: vi.fn().mockImplementation((action: { type: string }) => {
-      if (action.type.startsWith('refPoints/')) {
-        refPointsState = refPointsReducer(refPointsState, action);
-      }
-      return action;
-    }),
+    dispatch: vi
+      .fn()
+      .mockImplementation((action: { type: string; payload?: unknown }) => {
+        if (action.type.startsWith('refPoints/')) {
+          refPointsState = refPointsReducer(refPointsState, action);
+        }
+        return action;
+      }),
     replaceReducer: vi.fn(),
     writeFrame: vi.fn(),
     writeSessionMetadata: vi.fn(),
   } as unknown as RecorderStore;
+  lastTestStore = store;
   return store;
 }
 
 /**
- * Extract the RefPointMark from the most recent
- * `refPoints/addCurrentRefPointMark` action dispatched on the given store.
- *
- * Why: Finding 5 (2026-04-30 plan) moves visualization through Redux. The
- * call site dispatches the mark instead of calling refPointVisualizer
- * directly; tests that previously asserted on the visualizer's
- * `addCurrentRefPoint` mock now assert on the dispatched action payload.
+ * Step 5.4 test helper: seed a known geo anchor directly in `refPoints`
+ * so the H3 proximity matcher (`selectKnownAnchorsByCell`) can find it
+ * without routing through the legacy `importedRefPoints` field.
  */
-function getDispatchedCurrentMark(store: RecorderStore): RefPointMark {
-  const dispatch = store.dispatch as unknown as ReturnType<typeof vi.fn>;
-  const calls = dispatch.mock.calls as Array<
-    [{ type: string; payload: unknown }]
-  >;
-  const match = [...calls]
-    .reverse()
-    .find(([a]) => a?.type === 'refPoints/addCurrentRefPointMark');
-  if (!match) {
-    throw new Error(
-      'Expected a refPoints/addCurrentRefPointMark action to have been dispatched'
-    );
+function populateKnownAnchor(
+  store: RecorderStore,
+  anchor: {
+    name?: string;
+    lat: number;
+    lon: number;
+    timestamp?: number;
   }
-  return match[0].payload as RefPointMark;
+): void {
+  const ts = anchor.timestamp ?? Date.now();
+  const id = gpsToH3(anchor.lat, anchor.lon);
+  store.dispatch(
+    addRefPointEntry({
+      id,
+      timestamp: ts,
+      name: anchor.name,
+      rawGpsPoint: {
+        id: `gps-${id}`,
+        latitude: anchor.lat,
+        longitude: anchor.lon,
+        timestamp: ts,
+      },
+    })
+  );
 }
 
 /**
- * Assert that at least one `refPoints/addCurrentRefPointMark` action was
- * dispatched on the given store. Replacement for the legacy assertion
- * `expect(mockRefPointVisualizer.addCurrentRefPoint).toHaveBeenCalled()`.
+ * Step 5.7 helpers: query the V2 dispatch stream for ref-point markings.
+ *
+ * Production source-of-truth is the `refPoints/addRefPointEntry` action.
+ * These helpers replace the previous `mockMarkReferencePoint.mock.calls`
+ * lookups (the parallel `gpsData/markReferencePoint` dispatch was dropped
+ * in Step 5.7 of the 2026-05-27 slice-collapse plan).
+ */
+interface V2EntryPayload {
+  id: string;
+  timestamp?: number;
+  name?: string;
+  rawGpsPoint: {
+    latitude: number;
+    longitude: number;
+    altitude?: number;
+  };
+  position?: Vector3;
+  rotation?: Quaternion;
+  gpsPoint?: {
+    latitude: number;
+    longitude: number;
+    altitude?: number;
+  };
+}
+
+function getMarkCalls(store: RecorderStore): V2EntryPayload[] {
+  const dispatchMock = store.dispatch as unknown as {
+    mock: { calls: Array<[unknown]> };
+  };
+  return dispatchMock.mock.calls
+    .map((c) => c[0] as { type?: string; payload?: unknown })
+    .filter((a) => a?.type === 'refPoints/addRefPointEntry')
+    .map((a) => a.payload as V2EntryPayload);
+}
+
+function getLastV2Payload(store: RecorderStore): V2EntryPayload | undefined {
+  return getMarkCalls(store).at(-1);
+}
+
+function expectMarkDispatchedTimes(store: RecorderStore, n: number): void {
+  expect(getMarkCalls(store).length).toBe(n);
+}
+
+function getDispatchedCurrentMark(store: RecorderStore): RefPointMark {
+  // Step 5.7: source-of-truth dispatch is the V2 `refPoints/addRefPointEntry`
+  // action. Synthesise the legacy `RefPointMark` shape for assertion convenience
+  // by combining the V2 payload (id / timestamp / rawGpsPoint / gpsPoint?) with
+  // the latest extractOdomPosition / extractOdomRotation mock returns (the same
+  // values the production handler computes from the AR pose right before the
+  // dispatch).
+  const dispatchMock = store.dispatch as unknown as {
+    mock: { calls: Array<[unknown]> };
+  };
+  const v2Calls = dispatchMock.mock.calls
+    .map((c) => c[0] as { type?: string; payload?: unknown })
+    .filter((a) => a?.type === 'refPoints/addRefPointEntry');
+  const payload = v2Calls.at(-1)?.payload as
+    | {
+        id: string;
+        timestamp?: number;
+        rawGpsPoint: {
+          latitude: number;
+          longitude: number;
+          altitude?: number;
+        };
+        gpsPoint?: {
+          latitude: number;
+          longitude: number;
+          altitude?: number;
+        };
+      }
+    | undefined;
+  if (!payload) {
+    throw new Error(
+      'Expected a refPoints/addRefPointEntry action to have been dispatched'
+    );
+  }
+  const position = mockExtractOdomPosition.mock.results.at(-1)?.value as
+    | Vector3
+    | undefined;
+  const rotation = mockExtractOdomRotation.mock.results.at(-1)?.value as
+    | Quaternion
+    | undefined;
+  const fused = payload.gpsPoint ?? payload.rawGpsPoint;
+  return {
+    id: payload.id,
+    odomPosition: position ?? ([0, 0, 0] as Vector3),
+    odomRotation: rotation ?? ([0, 0, 0, 1] as Quaternion),
+    gpsPosition: {
+      lat: fused.latitude,
+      lon: fused.longitude,
+      altitude: fused.altitude,
+    },
+    timestamp: payload.timestamp ?? Date.now(),
+  };
+}
+
+/**
+ * Assert that at least one `refPoints/addRefPointEntry` action was
+ * dispatched (Step 5.7: the V2 slice is the canonical mark log).
  */
 function expectCurrentRefPointDispatched(store: RecorderStore): void {
-  const dispatch = store.dispatch as unknown as ReturnType<typeof vi.fn>;
-  const calls = dispatch.mock.calls as Array<[{ type: string }]>;
-  expect(
-    calls.some(([a]) => a?.type === 'refPoints/addCurrentRefPointMark')
-  ).toBe(true);
+  const dispatchMock = store.dispatch as unknown as {
+    mock: { calls: Array<[unknown]> };
+  };
+  const v2Calls = dispatchMock.mock.calls
+    .map((c) => c[0] as { type?: string })
+    .filter((a) => a?.type === 'refPoints/addRefPointEntry');
+  expect(v2Calls.length).toBeGreaterThan(0);
 }
 
 function createMockGpsPoint(overrides?: Partial<GpsPoint>): GpsPoint {
@@ -249,8 +395,13 @@ function createMockArPose(): ARPose {
 function createDefaultDeps(
   overrides?: Partial<RefPointHandlersDeps>
 ): RefPointHandlersDeps {
-  const gpsPoint = createMockGpsPoint();
-  const store = createMockStore([gpsPoint]);
+  // If the caller supplies a `getStore`, reuse it so `lastTestStore`
+  // (set by `createMockStore`) reflects the store the handlers will
+  // actually dispatch into. Otherwise create a fresh mock store.
+  const store = overrides?.getStore
+    ? overrides.getStore()
+    : createMockStore([createMockGpsPoint()]);
+  lastTestStore = store;
   return {
     getStore: () => store,
     getCurrentSessionName: () => 'recording-test-session',
@@ -274,100 +425,13 @@ describe('createRefPointHandlers', () => {
     handlers = createRefPointHandlers(createDefaultDeps());
   });
 
-  // Why: The factory must return an object with all required handler functions
-  // and state accessors, matching the contract used by main.ts.
-  it('should return all handler functions and state accessors', () => {
+  // Why: The factory must return an object with the public handler functions.
+  // Imported-ref-point reads/writes and session usage now live in the
+  // `refPoints` slice (Step 5.7a-3 Option C); the factory no longer
+  // exposes those accessors.
+  it('should return all handler functions', () => {
     expect(handlers.handleMarkRefPoint).toBeTypeOf('function');
-    expect(handlers.getImportedRefPoints).toBeTypeOf('function');
-    expect(handlers.setImportedRefPoints).toBeTypeOf('function');
-    expect(handlers.getSessionRefPointUsage).toBeTypeOf('function');
-    expect(handlers.clearSessionRefPointUsage).toBeTypeOf('function');
     expect(handlers.reset).toBeTypeOf('function');
-  });
-
-  // Why: Default state must match the original module-level initialization.
-  it('should initialize with default state', () => {
-    expect(handlers.getImportedRefPoints()).toEqual([]);
-    expect(handlers.getSessionRefPointUsage().size).toBe(0);
-  });
-});
-
-// ============================================================================
-// State management
-// ============================================================================
-
-describe('ref-point state management', () => {
-  let handlers: RefPointHandlers;
-
-  beforeEach(() => {
-    vi.clearAllMocks();
-    handlers = createRefPointHandlers(createDefaultDeps());
-  });
-
-  // Why: Imported ref points must be settable (e.g., from folder import) and gettable
-  it('should set and get imported ref points', () => {
-    const refPoints: ImportedRefPoint[] = [
-      {
-        id: 'pointA',
-        name: 'Point A',
-        lat: 49.1,
-        lon: 8.1,
-        sourceZipName: 'session1.zip',
-      },
-      {
-        id: 'pointB',
-        name: 'Point B',
-        lat: 49.2,
-        lon: 8.2,
-        sourceZipName: 'session2.zip',
-      },
-    ];
-    handlers.setImportedRefPoints(refPoints);
-    expect(handlers.getImportedRefPoints()).toEqual(refPoints);
-  });
-
-  // Why: Session usage tracking should be clearable between recordings.
-  // We populate the map via handleMarkRefPoint, then verify clear empties it.
-  it('should track and clear session ref point usage', async () => {
-    mockIsRefPointPickerVisible.mockReturnValue(false);
-    mockGetCurrentArPose.mockReturnValue(createMockArPose());
-    mockGetCurrentScenarioHandle.mockReturnValue(createMockScenarioHandle());
-    mockListRefPointIds.mockResolvedValue([]);
-    mockShowRefPointPicker.mockResolvedValue({ id: 'bench', isNew: true });
-
-    await handlers.handleMarkRefPoint();
-    expect(handlers.getSessionRefPointUsage().size).toBeGreaterThan(0);
-    // Usage is now keyed by H3 index (not picker name 'bench')
-    const [h3Key] = [...handlers.getSessionRefPointUsage().keys()];
-    expect(h3Key).toMatch(/^[0-9a-f]{15}$/);
-    expect(handlers.getSessionRefPointUsage().get(h3Key)).toBe(1);
-
-    handlers.clearSessionRefPointUsage();
-    expect(handlers.getSessionRefPointUsage().size).toBe(0);
-  });
-
-  // Why: reset() must clear all state back to initial values, including
-  // sessionRefPointUsage populated via handleMarkRefPoint (not just the
-  // trivially-empty default).
-  it('should reset all state', async () => {
-    // Populate importedRefPoints
-    handlers.setImportedRefPoints([
-      { id: 'x', name: 'x', lat: 0, lon: 0, sourceZipName: 'z.zip' },
-    ]);
-
-    // Populate sessionRefPointUsage via a full handleMarkRefPoint flow
-    mockIsRefPointPickerVisible.mockReturnValue(false);
-    mockGetCurrentArPose.mockReturnValue(createMockArPose());
-    mockGetCurrentScenarioHandle.mockReturnValue(createMockScenarioHandle());
-    mockListRefPointIds.mockResolvedValue([]);
-    mockShowRefPointPicker.mockResolvedValue({ id: 'bench', isNew: true });
-
-    await handlers.handleMarkRefPoint();
-    expect(handlers.getSessionRefPointUsage().size).toBe(1);
-
-    handlers.reset();
-    expect(handlers.getImportedRefPoints()).toEqual([]);
-    expect(handlers.getSessionRefPointUsage().size).toBe(0);
   });
 });
 
@@ -435,6 +499,7 @@ describe('handleMarkRefPoint — validation', () => {
 
 describe('handleMarkRefPoint — picker integration', () => {
   let handlers: RefPointHandlers;
+  let store: RecorderStore;
   const mockArPose = createMockArPose();
   const mockGpsPoint = createMockGpsPoint();
 
@@ -448,7 +513,7 @@ describe('handleMarkRefPoint — picker integration', () => {
     mockShowRefPointPicker.mockResolvedValue(null);
     mockExtractOdomPosition.mockReturnValue([1, 2, 3] as Vector3);
     mockExtractOdomRotation.mockReturnValue([0, 0, 0, 1] as Quaternion);
-    const store = createMockStore([mockGpsPoint]);
+    store = createMockStore([mockGpsPoint]);
     handlers = createRefPointHandlers(
       createDefaultDeps({ getStore: () => store })
     );
@@ -463,7 +528,7 @@ describe('handleMarkRefPoint — picker integration', () => {
     mockShowRefPointPicker.mockResolvedValue({ id: 'MyNew', isNew: true });
 
     // Imported refs are far from GPS (49, 8) — won't match as re-observation
-    handlers.setImportedRefPoints([
+    seedImportedRefPoints([
       {
         id: 'importedA',
         name: 'Imported A',
@@ -492,7 +557,7 @@ describe('handleMarkRefPoint — picker integration', () => {
   it('should show picker with empty suggestions when no scenario handle and no nearby match', async () => {
     mockGetCurrentScenarioHandle.mockReturnValue(null);
     mockShowRefPointPicker.mockResolvedValue({ id: 'NewRef', isNew: true });
-    handlers.setImportedRefPoints([
+    seedImportedRefPoints([
       {
         id: 'importedOnly',
         name: 'importedOnly',
@@ -516,7 +581,7 @@ describe('handleMarkRefPoint — picker integration', () => {
     mockGetCurrentScenarioHandle.mockReturnValue(handle);
 
     // Imported ref at same coords as GPS position (49, 8)
-    handlers.setImportedRefPoints([
+    seedImportedRefPoints([
       {
         id: 'Bank',
         name: 'Bank',
@@ -531,9 +596,33 @@ describe('handleMarkRefPoint — picker integration', () => {
     // Picker should NOT be shown
     expect(mockShowRefPointPicker).not.toHaveBeenCalled();
     // But the ref point should still be dispatched with H3 ID
-    expect(mockMarkReferencePoint).toHaveBeenCalled();
-    const payload = mockMarkReferencePoint.mock.calls[0][0] as { id: string };
-    expect(payload.id).toMatch(/^[0-9a-f]{15}$/);
+    const payload = getLastV2Payload(store);
+    expect(payload).toBeDefined();
+    expect(payload!.id).toMatch(/^[0-9a-f]{15}$/);
+  });
+
+  // Why: The raw WebXR AR pose (odomPosition/odomRotation) is the
+  // load-bearing input the investigation harness recomputes alignment
+  // from. The dispatch site previously discarded it (underscore-prefixed
+  // params); this asserts it now reaches the addRefPointEntry payload
+  // verbatim in the raw WebXR frame (NOT webxrToNUE-converted). See
+  // 2026-05-29-investigation-harness-refpoint-source-migration-plan.md §E.
+  it('should carry the raw WebXR AR pose on the dispatched payload', async () => {
+    const handle = createMockScenarioHandle();
+    mockGetCurrentScenarioHandle.mockReturnValue(handle);
+    mockExtractOdomPosition.mockReturnValue([1.5, -2.25, 3.75] as Vector3);
+    mockExtractOdomRotation.mockReturnValue([0.1, 0.2, 0.3, 0.9] as Quaternion);
+
+    seedImportedRefPoints([
+      { id: 'Bank', name: 'Bank', lat: 49.0, lon: 8.0, sourceZipName: 'p.zip' },
+    ]);
+
+    await handlers.handleMarkRefPoint();
+
+    const payload = getLastV2Payload(store);
+    expect(payload).toBeDefined();
+    expect(payload!.position).toEqual([1.5, -2.25, 3.75]);
+    expect(payload!.rotation).toEqual([0.1, 0.2, 0.3, 0.9]);
   });
 
   // Why: Re-observation should use the imported ref point's display name (not H3 index)
@@ -542,7 +631,7 @@ describe('handleMarkRefPoint — picker integration', () => {
     const handle = createMockScenarioHandle();
     mockGetCurrentScenarioHandle.mockReturnValue(handle);
 
-    handlers.setImportedRefPoints([
+    seedImportedRefPoints([
       {
         id: 'Bank',
         name: 'Bank',
@@ -580,7 +669,7 @@ describe('handleMarkRefPoint — picker integration', () => {
     mockShowRefPointPicker.mockResolvedValue({ id: 'My Point', isNew: true });
 
     // Imported refs far away — no nearby match, new ref point flow
-    handlers.setImportedRefPoints([
+    seedImportedRefPoints([
       {
         id: 'FarAway',
         name: 'Far Away',
@@ -595,6 +684,81 @@ describe('handleMarkRefPoint — picker integration', () => {
     expect(mockShowRefPointPicker).toHaveBeenCalled();
     const passedIds = mockShowRefPointPicker.mock.calls[0][0];
     expect(passedIds).toEqual([]);
+  });
+});
+
+// ============================================================================
+// handleMarkRefPoint — Step 5.4: matcher reads refPoints
+// ============================================================================
+
+describe('handleMarkRefPoint — Step 5.4 matcher source', () => {
+  /**
+   * Why this test matters:
+   * Step 5.4 of the 2026-05-27 slice-collapse plan switches the H3
+   * proximity matcher from `selectCachedKnownRefPoints(state.refPoints)`
+   * to `selectKnownAnchorsByCell(state.refPoints)`. After the swap, a
+   * known anchor stored only in `refPoints` (i.e. no entry in the
+   * legacy `importedRefPoints` field) must still trigger the
+   * re-observation path and propagate its human-readable name through
+   * to the persisted observation.
+   *
+   * Before the handler change this test fails (matcher sees an empty
+   * legacy list → no nearby match → picker is shown). After the change
+   * it passes.
+   */
+  it('re-observes via refPoints anchor when legacy importedRefPoints is empty', async () => {
+    vi.clearAllMocks();
+    mockIsRefPointPickerVisible.mockReturnValue(false);
+    const mockArPose = createMockArPose();
+    const mockGpsPoint = createMockGpsPoint();
+    mockGetCurrentArPose.mockReturnValue(mockArPose);
+    const store = createMockStore([mockGpsPoint]);
+    const handle = createMockScenarioHandle();
+    mockGetCurrentScenarioHandle.mockReturnValue(handle);
+    mockExtractOdomPosition.mockReturnValue([1, 2, 3] as Vector3);
+    mockExtractOdomRotation.mockReturnValue([0, 0, 0, 1] as Quaternion);
+
+    const handlers = createRefPointHandlers(
+      createDefaultDeps({ getStore: () => store })
+    );
+
+    // Seed refPoints only — legacy importedRefPoints stays empty.
+    populateKnownAnchor(store, {
+      name: 'Bench Corner',
+      lat: 49.0,
+      lon: 8.0,
+    });
+
+    await handlers.handleMarkRefPoint();
+
+    // Re-observation path: picker must NOT be shown.
+    expect(mockShowRefPointPicker).not.toHaveBeenCalled();
+    // The persisted display name must come from the refPoints anchor.
+    expect(mockSaveRefPointObservation).toHaveBeenCalled();
+    const persistedName = mockSaveRefPointObservation.mock.calls[0][2];
+    expect(persistedName).toBe('Bench Corner');
+  });
+
+  /**
+   * Why this test matters:
+   * `checkNearbyRefPoint` is the capture-button label feeder and must
+   * also use the new matcher source. The asymmetry of having the mark
+   * path read from refPoints while the label path still reads from
+   * the legacy slice would surface as a stale or empty button label.
+   */
+  it('checkNearbyRefPoint resolves displayName via refPoints', () => {
+    const store = createMockStore();
+    const handlers = createRefPointHandlers(
+      createDefaultDeps({ getStore: () => store })
+    );
+
+    populateKnownAnchor(store, {
+      name: 'Bank',
+      lat: 49.0,
+      lon: 8.0,
+    });
+
+    expect(handlers.checkNearbyRefPoint(49.0, 8.0)?.displayName).toBe('Bank');
   });
 });
 
@@ -683,28 +847,6 @@ describe('handleMarkRefPoint — full flow', () => {
     );
   });
 
-  // Why: Session usage count must be tracked for the picker's usage column.
-  it('should track session ref point usage', async () => {
-    await handlers.handleMarkRefPoint();
-
-    const usage = handlers.getSessionRefPointUsage();
-    // Usage is keyed by H3 index, not picker name
-    expect(usage.size).toBe(1);
-    const [h3Key] = [...usage.keys()];
-    expect(h3Key).toMatch(/^[0-9a-f]{15}$/);
-    expect(usage.get(h3Key)).toBe(1);
-  });
-
-  // Why: Multiple markings of the same ref point should increment the count.
-  it('should increment usage count on repeated marking', async () => {
-    await handlers.handleMarkRefPoint();
-    await handlers.handleMarkRefPoint();
-
-    const usage = handlers.getSessionRefPointUsage();
-    const [h3Key] = [...usage.keys()];
-    expect(usage.get(h3Key)).toBe(2);
-  });
-
   // Why: If no scenario handle, persist should be skipped but dispatch/visualize still happen.
   it('should skip persist when no scenario handle', async () => {
     mockGetCurrentScenarioHandle.mockReturnValue(null);
@@ -714,6 +856,37 @@ describe('handleMarkRefPoint — full flow', () => {
     expect(mockSaveRefPointObservation).not.toHaveBeenCalled();
     expect(mockStore.dispatch).toHaveBeenCalled();
     expectCurrentRefPointDispatched(mockStore);
+  });
+
+  // Why (Step 5.7 of 2026-05-27 slice-collapse plan): the dispatched V2
+  // `addRefPointEntry` action must carry the fused-at-mark-time `gpsPoint`
+  // snapshot (`RawGpsPoint` shape) when the live alignment matrix is in
+  // effect. When the recorder has no alignment yet, the payload omits the
+  // field and downstream consumers fall back to `rawGpsPoint`.
+  it('should carry fused gpsPoint on V2 payload when alignmentMatrix is present', async () => {
+    const matrix = new Array(16).fill(0) as number[];
+    matrix[0] = matrix[5] = matrix[10] = matrix[15] = 1;
+    const storeWithMatrix = createMockStore([createMockGpsPoint()], {
+      alignmentMatrix: matrix,
+    });
+    const localHandlers = createRefPointHandlers(
+      createDefaultDeps({ getStore: () => storeWithMatrix })
+    );
+
+    await localHandlers.handleMarkRefPoint();
+
+    const payload = getLastV2Payload(storeWithMatrix);
+    expect(payload?.gpsPoint).toBeDefined();
+    expect(payload?.gpsPoint?.latitude).toBe(49.123);
+    expect(payload?.gpsPoint?.longitude).toBe(8.456);
+  });
+
+  it('should omit gpsPoint on V2 payload when no alignmentMatrix is in state', async () => {
+    // mockStore created in beforeEach has alignmentMatrix=null.
+    await handlers.handleMarkRefPoint();
+
+    const payload = getLastV2Payload(mockStore);
+    expect(payload?.gpsPoint).toBeUndefined();
   });
 });
 
@@ -811,7 +984,7 @@ describe('handleMarkRefPoint — re-observation cooldown', () => {
     );
 
     // Import a ref point at the GPS position (49, 8) → re-observation path
-    handlers.setImportedRefPoints([
+    seedImportedRefPoints([
       {
         id: 'Bank',
         name: 'Bank',
@@ -823,11 +996,11 @@ describe('handleMarkRefPoint — re-observation cooldown', () => {
 
     // First re-observation should succeed
     await handlers.handleMarkRefPoint();
-    expect(mockMarkReferencePoint).toHaveBeenCalledTimes(1);
+    expectMarkDispatchedTimes(store, 1);
 
     // Second re-observation within cooldown should be silently ignored
     await handlers.handleMarkRefPoint();
-    expect(mockMarkReferencePoint).toHaveBeenCalledTimes(1); // Still 1
+    expectMarkDispatchedTimes(store, 1); // Still 1
   });
 
   it('should allow re-observation after cooldown expires', async () => {
@@ -847,7 +1020,7 @@ describe('handleMarkRefPoint — re-observation cooldown', () => {
       createDefaultDeps({ getStore: () => store })
     );
 
-    handlers.setImportedRefPoints([
+    seedImportedRefPoints([
       {
         id: 'Bank',
         name: 'Bank',
@@ -859,14 +1032,14 @@ describe('handleMarkRefPoint — re-observation cooldown', () => {
 
     // First mark
     await handlers.handleMarkRefPoint();
-    expect(mockMarkReferencePoint).toHaveBeenCalledTimes(1);
+    expectMarkDispatchedTimes(store, 1);
 
     // Advance past the cooldown (10 seconds)
     vi.advanceTimersByTime(11_000);
 
     // Second mark should now succeed
     await handlers.handleMarkRefPoint();
-    expect(mockMarkReferencePoint).toHaveBeenCalledTimes(2);
+    expectMarkDispatchedTimes(store, 2);
 
     vi.useRealTimers();
   });
@@ -890,7 +1063,7 @@ describe('handleMarkRefPoint — re-observation cooldown', () => {
 
     // No imported ref points → new ref point flow (picker shown)
     await handlers.handleMarkRefPoint();
-    expect(mockMarkReferencePoint).toHaveBeenCalledTimes(1);
+    expectMarkDispatchedTimes(store, 1);
 
     // Second new ref point should still work immediately
     mockShowRefPointPicker.mockResolvedValue({
@@ -898,7 +1071,7 @@ describe('handleMarkRefPoint — re-observation cooldown', () => {
       isNew: true,
     });
     await handlers.handleMarkRefPoint();
-    expect(mockMarkReferencePoint).toHaveBeenCalledTimes(2);
+    expectMarkDispatchedTimes(store, 2);
   });
 
   // Why: reset() must clear the per-H3-cell cooldown map so that cooldown
@@ -921,7 +1094,7 @@ describe('handleMarkRefPoint — re-observation cooldown', () => {
     );
 
     // Import a ref point at the GPS position → re-observation path
-    handlers.setImportedRefPoints([
+    seedImportedRefPoints([
       {
         id: 'Bank',
         name: 'Bank',
@@ -933,17 +1106,17 @@ describe('handleMarkRefPoint — re-observation cooldown', () => {
 
     // First re-observation should succeed
     await handlers.handleMarkRefPoint();
-    expect(mockMarkReferencePoint).toHaveBeenCalledTimes(1);
+    expectMarkDispatchedTimes(store, 1);
 
     // Cooldown is now active — second call should be ignored
     await handlers.handleMarkRefPoint();
-    expect(mockMarkReferencePoint).toHaveBeenCalledTimes(1);
+    expectMarkDispatchedTimes(store, 1);
 
     // Reset should clear cooldown state
     handlers.reset();
 
     // Re-import ref points (reset clears them)
-    handlers.setImportedRefPoints([
+    seedImportedRefPoints([
       {
         id: 'Bank',
         name: 'Bank',
@@ -955,7 +1128,7 @@ describe('handleMarkRefPoint — re-observation cooldown', () => {
 
     // Re-observation should succeed immediately after reset (no cooldown)
     await handlers.handleMarkRefPoint();
-    expect(mockMarkReferencePoint).toHaveBeenCalledTimes(2);
+    expectMarkDispatchedTimes(store, 2);
   });
 });
 
@@ -1039,11 +1212,11 @@ describe('handleMarkRefPoint — H3-based ID', () => {
     await handlers.handleMarkRefPoint();
 
     // The dispatched action must use the H3 index, not "Bank"
-    expect(mockMarkReferencePoint).toHaveBeenCalled();
-    const payload = mockMarkReferencePoint.mock.calls[0][0] as { id: string };
+    const payload = getLastV2Payload(mockStore);
+    expect(payload).toBeDefined();
     // H3 res-11 indices are 15-char hex strings
-    expect(payload.id).toMatch(/^[0-9a-f]{15}$/);
-    expect(payload.id).not.toBe('Bank');
+    expect(payload!.id).toMatch(/^[0-9a-f]{15}$/);
+    expect(payload!.id).not.toBe('Bank');
   });
 
   it('should persist the ref point using H3 index as ID and picker name as display name', async () => {
@@ -1064,7 +1237,7 @@ describe('handleMarkRefPoint — H3-based ID', () => {
     mockShowRefPointPicker.mockResolvedValue({ id: 'Name1', isNew: true });
     await handlers.handleMarkRefPoint();
 
-    const id1 = (mockMarkReferencePoint.mock.calls[0][0] as { id: string }).id;
+    const id1 = getLastV2Payload(mockStore)!.id;
 
     // Reset and mark again at the same GPS position but with different user name
     vi.clearAllMocks();
@@ -1078,7 +1251,7 @@ describe('handleMarkRefPoint — H3-based ID', () => {
     mockShowRefPointPicker.mockResolvedValue({ id: 'Name2', isNew: true });
     await handlers.handleMarkRefPoint();
 
-    const id2 = (mockMarkReferencePoint.mock.calls[0][0] as { id: string }).id;
+    const id2 = getLastV2Payload(mockStore)!.id;
     expect(id1).toBe(id2);
   });
 
@@ -1090,19 +1263,6 @@ describe('handleMarkRefPoint — H3-based ID', () => {
     const mark = getDispatchedCurrentMark(mockStore);
     expect(mark.id).toMatch(/^[0-9a-f]{15}$/);
     expect(mark.id).not.toBe('MyRef');
-  });
-
-  it('should track session usage by H3 index, not picker name', async () => {
-    mockShowRefPointPicker.mockResolvedValue({ id: 'Bank', isNew: true });
-
-    await handlers.handleMarkRefPoint();
-
-    const usage = handlers.getSessionRefPointUsage();
-    expect(usage.has('Bank')).toBe(false);
-    // Should have exactly one entry keyed by the H3 index
-    expect(usage.size).toBe(1);
-    const [key] = [...usage.keys()];
-    expect(key).toMatch(/^[0-9a-f]{15}$/);
   });
 });
 
@@ -1131,7 +1291,7 @@ describe('checkNearbyRefPoint', () => {
    */
   it('returns display name when within gridDisk of an imported ref point', () => {
     // Set imported ref points at a known location
-    handlers.setImportedRefPoints([
+    seedImportedRefPoints([
       {
         id: 'Bank',
         name: 'Bank',
@@ -1152,7 +1312,7 @@ describe('checkNearbyRefPoint', () => {
    * return undefined so the button reverts to the default label.
    */
   it('returns undefined when far from any imported ref point', () => {
-    handlers.setImportedRefPoints([
+    seedImportedRefPoints([
       {
         id: 'Bank',
         name: 'Bank',
@@ -1183,7 +1343,7 @@ describe('checkNearbyRefPoint', () => {
    * checks should return undefined.
    */
   it('returns undefined after reset', () => {
-    handlers.setImportedRefPoints([
+    seedImportedRefPoints([
       {
         id: 'Bank',
         name: 'Bank',
@@ -1209,7 +1369,7 @@ describe('checkNearbyRefPoint', () => {
    */
   it('reflects updated ref points after a second setImportedRefPoints call', () => {
     // Initial set: "Bank" at (49.0, 8.0)
-    handlers.setImportedRefPoints([
+    seedImportedRefPoints([
       {
         id: 'Bank',
         name: 'Bank',
@@ -1221,7 +1381,7 @@ describe('checkNearbyRefPoint', () => {
     expect(handlers.checkNearbyRefPoint(49.0, 8.0)?.displayName).toBe('Bank');
 
     // Replace with "Library" at a completely different location
-    handlers.setImportedRefPoints([
+    seedImportedRefPoints([
       {
         id: 'Library',
         name: 'Library',
@@ -1251,7 +1411,7 @@ describe('checkNearbyRefPoint', () => {
    * still passes behaviorally but documents the expected invariant.
    */
   it('returns consistent results across many rapid calls', () => {
-    handlers.setImportedRefPoints([
+    seedImportedRefPoints([
       {
         id: 'Bank',
         name: 'Bank',
@@ -1530,7 +1690,7 @@ describe('checkNearbyRefPoint — isNeighborCell', () => {
   // Why: When the user is in the exact same H3 cell as the ref point,
   // isNeighborCell should be false (no need to add a new ref point here).
   it('returns isNeighborCell=false when in the same center cell', () => {
-    handlers.setImportedRefPoints([
+    seedImportedRefPoints([
       {
         id: 'Bank',
         name: 'Bank',
@@ -1549,7 +1709,7 @@ describe('checkNearbyRefPoint — isNeighborCell', () => {
   // center cell), isNeighborCell should be true. At H3 res-11, a shift of
   // ~0.0003Â° (~33m) should land in a neighbor cell while still in the gridDisk.
   it('returns isNeighborCell=true when in a neighbor gridDisk cell', () => {
-    handlers.setImportedRefPoints([
+    seedImportedRefPoints([
       {
         id: 'Bank',
         name: 'Bank',
@@ -1569,7 +1729,7 @@ describe('checkNearbyRefPoint — isNeighborCell', () => {
   // Why: When the user is far away (no match), undefined should be returned,
   // even with the new return type.
   it('returns undefined when outside all gridDisk zones', () => {
-    handlers.setImportedRefPoints([
+    seedImportedRefPoints([
       {
         id: 'Bank',
         name: 'Bank',
@@ -1612,7 +1772,7 @@ describe('handleMarkRefPoint — forceNew', () => {
     });
 
     // Import a ref point at the user's location — normally would trigger re-observation
-    handlers.setImportedRefPoints([
+    seedImportedRefPoints([
       {
         id: 'Bank',
         name: 'Bank',
@@ -1644,7 +1804,7 @@ describe('handleMarkRefPoint — forceNew', () => {
       getCurrentSessionName: () => 'test-session',
     });
 
-    handlers.setImportedRefPoints([
+    seedImportedRefPoints([
       {
         id: 'Bank',
         name: 'Bank',
@@ -1694,7 +1854,7 @@ describe('handleMarkRefPoint — re-observation toast feedback', () => {
     const handlers = createRefPointHandlers(
       createDefaultDeps({ getStore: () => store })
     );
-    handlers.setImportedRefPoints([
+    seedImportedRefPoints([
       {
         id: 'Bank',
         name: 'Bank',
@@ -1775,5 +1935,145 @@ describe('handleMarkRefPoint — re-observation toast feedback', () => {
     // showError is the existing failure feedback channel
     expect(mockShowError).toHaveBeenCalled();
     expect(mockShowToast).not.toHaveBeenCalled();
+  });
+});
+
+// ============================================================================
+// Step 5.2 + 5.7 (2026-05-27 slice-collapse plan): refPoints dispatch
+// ============================================================================
+
+/**
+ * Why these tests matter: `handleMarkRefPoint` must dispatch a
+ * `refPoints/addRefPointEntry` action carrying the H3-cell `id`,
+ * `timestamp`, `rawGpsPoint`, and the picker/imported `name`. When an
+ * alignment matrix is in effect at mark-time the entry's `gpsPoint`
+ * snapshot carries the fused lat/lon; otherwise it is omitted
+ * (consumers fall back to `rawGpsPoint`). Step 5.7 dropped the
+ * previously-parallel `gpsData/markReferencePoint` dispatch — the V2
+ * action is now the sole source of truth.
+ */
+describe('handleMarkRefPoint — refPoints dispatch (Step 5.2 / 5.7)', () => {
+  function findV2Dispatch(
+    store: RecorderStore
+  ): { type: string; payload: unknown } | undefined {
+    const dispatchMock = store.dispatch as unknown as {
+      mock: { calls: Array<[{ type: string; payload: unknown }]> };
+    };
+    return dispatchMock.mock.calls
+      .map((c) => c[0])
+      .find((a) => a?.type === 'refPoints/addRefPointEntry');
+  }
+
+  it('dispatches refPoints/addRefPointEntry with id/timestamp/rawGpsPoint/name', async () => {
+    vi.clearAllMocks();
+    mockIsRefPointPickerVisible.mockReturnValue(false);
+    mockGetCurrentArPose.mockReturnValue(createMockArPose());
+    mockGetCurrentScenarioHandle.mockReturnValue(createMockScenarioHandle());
+    mockShowRefPointPicker.mockResolvedValue({ id: 'bench', isNew: true });
+    const store = createMockStore([createMockGpsPoint()]);
+    const handlers = createRefPointHandlers(
+      createDefaultDeps({ getStore: () => store })
+    );
+
+    const before = Date.now();
+    await handlers.handleMarkRefPoint();
+
+    expectMarkDispatchedTimes(store, 1);
+    const v2 = findV2Dispatch(store);
+    expect(v2).toBeDefined();
+    const v2Payload = v2!.payload as {
+      id: string;
+      timestamp: number;
+      name?: string;
+      rawGpsPoint: { latitude: number; longitude: number };
+    };
+    expect(v2Payload.id).toMatch(/^[0-9a-f]{15}$/);
+    expect(v2Payload.timestamp).toBeGreaterThanOrEqual(before);
+    expect(v2Payload.rawGpsPoint.latitude).toBe(49.0);
+    expect(v2Payload.rawGpsPoint.longitude).toBe(8.0);
+    expect(v2Payload.name).toBe('bench');
+  });
+
+  it('carries the fused snapshot on gpsPoint when an alignment matrix is in effect', async () => {
+    vi.clearAllMocks();
+    mockIsRefPointPickerVisible.mockReturnValue(false);
+    mockGetCurrentArPose.mockReturnValue(createMockArPose());
+    mockGetCurrentScenarioHandle.mockReturnValue(createMockScenarioHandle());
+    mockShowRefPointPicker.mockResolvedValue({ id: 'bench', isNew: true });
+    mockFusedGpsFromOdom.mockReturnValueOnce({
+      lat: 49.5,
+      lon: 8.5,
+      altitude: 250,
+    });
+    const matrix = new Array(16).fill(0) as number[];
+    matrix[0] = matrix[5] = matrix[10] = matrix[15] = 1;
+    const store = createMockStore([createMockGpsPoint()], {
+      alignmentMatrix: matrix,
+    });
+    const handlers = createRefPointHandlers(
+      createDefaultDeps({ getStore: () => store })
+    );
+
+    await handlers.handleMarkRefPoint();
+
+    const v2 = findV2Dispatch(store);
+    const v2Payload = v2!.payload as {
+      gpsPoint?: { latitude: number; longitude: number; altitude?: number };
+      rawGpsPoint: { latitude: number; longitude: number; altitude?: number };
+    };
+    expect(v2Payload.gpsPoint).toBeDefined();
+    expect(v2Payload.gpsPoint!.latitude).toBe(49.5);
+    expect(v2Payload.gpsPoint!.longitude).toBe(8.5);
+    expect(v2Payload.gpsPoint!.altitude).toBe(250);
+    // The raw snapshot is preserved untouched
+    expect(v2Payload.rawGpsPoint.latitude).toBe(49.0);
+    expect(v2Payload.rawGpsPoint.longitude).toBe(8.0);
+  });
+
+  it('omits gpsPoint when no alignment matrix is in effect', async () => {
+    vi.clearAllMocks();
+    mockIsRefPointPickerVisible.mockReturnValue(false);
+    mockGetCurrentArPose.mockReturnValue(createMockArPose());
+    mockGetCurrentScenarioHandle.mockReturnValue(createMockScenarioHandle());
+    mockShowRefPointPicker.mockResolvedValue({ id: 'bench', isNew: true });
+    // createMockStore default has alignmentMatrix=null
+    const store = createMockStore([createMockGpsPoint()]);
+    const handlers = createRefPointHandlers(
+      createDefaultDeps({ getStore: () => store })
+    );
+
+    await handlers.handleMarkRefPoint();
+
+    const v2 = findV2Dispatch(store);
+    const v2Payload = v2!.payload as { gpsPoint?: unknown };
+    expect(v2Payload.gpsPoint).toBeUndefined();
+  });
+
+  it('propagates the nearby anchor name on re-observation', async () => {
+    vi.clearAllMocks();
+    mockIsRefPointPickerVisible.mockReturnValue(false);
+    mockGetCurrentArPose.mockReturnValue(createMockArPose());
+    mockGetCurrentScenarioHandle.mockReturnValue(createMockScenarioHandle());
+    const store = createMockStore([createMockGpsPoint()]);
+    const handlers = createRefPointHandlers(
+      createDefaultDeps({ getStore: () => store })
+    );
+    // Imported ref point at the GPS position → re-observation path,
+    // picker is bypassed, name comes from the matched anchor.
+    seedImportedRefPoints([
+      {
+        id: 'Bank',
+        name: 'Bank',
+        lat: 49.0,
+        lon: 8.0,
+        sourceZipName: 'prev.zip',
+      },
+    ]);
+
+    await handlers.handleMarkRefPoint();
+
+    const v2 = findV2Dispatch(store);
+    const v2Payload = v2!.payload as { name?: string };
+    expect(v2Payload.name).toBe('Bank');
   });
 });

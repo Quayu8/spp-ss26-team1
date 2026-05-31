@@ -24,8 +24,14 @@ import {
   selectOdometryPositions,
   selectOdometryRotations,
   selectZeroReference,
-  selectReferencePoints,
+  selectFrameTilesInWebXR,
 } from './app-selectors';
+import {
+  webxrToNUE,
+  webxrQuaternionToNUE,
+  normalizeQuaternion,
+} from 'gps-plus-slam-js';
+import type { ArImageCapture } from 'gps-plus-slam-js';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -40,6 +46,8 @@ function makeState(
     gpsElements: {} as CombinedRootState['gpsElements'],
     arElements: {} as CombinedRootState['arElements'],
     recording: {} as CombinedRootState['recording'],
+    tracking: {} as CombinedRootState['tracking'],
+    trackingQuality: {} as CombinedRootState['trackingQuality'],
   };
 }
 
@@ -67,7 +75,6 @@ function makeGpsData(
       currentGpsPosGeoHash: null,
     },
     odometryPath: { positions: [], rotations: [] },
-    referencePoints: [],
     ...overrides,
   } as CombinedRootState['gpsData'];
 }
@@ -100,10 +107,6 @@ describe('app-level selectors', () => {
 
     it('selectZeroReference returns null', () => {
       expect(selectZeroReference(state)).toBeNull();
-    });
-
-    it('selectReferencePoints returns empty array', () => {
-      expect(selectReferencePoints(state)).toEqual([]);
     });
   });
 
@@ -143,29 +146,6 @@ describe('app-level selectors', () => {
       const state = makeState(gpsData);
       expect(selectZeroReference(state)).toBe(zero);
     });
-
-    it('selectReferencePoints returns reference points', () => {
-      const refPoints = [
-        {
-          id: 'rp1',
-          gpsPoint: {
-            id: 'rp1',
-            latitude: 50,
-            longitude: 8,
-            zeroRef: { lat: 50, lon: 8 },
-            coordinates: [0, 0, 0] as [number, number, number],
-            weight: 1,
-            timestamp: 1000,
-          },
-          position: [0, 0, 0] as [number, number, number],
-          rotation: [0, 0, 0, 1] as [number, number, number, number],
-          timestamp: 1000,
-        },
-      ];
-      const gpsData = makeGpsData({ referencePoints: refPoints });
-      const state = makeState(gpsData);
-      expect(selectReferencePoints(state)).toBe(refPoints);
-    });
   });
 
   // --- Memoization ---
@@ -203,6 +183,163 @@ describe('app-level selectors', () => {
       // Actually: state1.gpsData === null and state2.gpsData === null
       // null === null → input unchanged → cached result returned
       expect(selectGpsPositions(state1)).toBe(selectGpsPositions(state2));
+    });
+  });
+
+  // --- selectFrameTilesInWebXR ---
+
+  describe('selectFrameTilesInWebXR', () => {
+    // Why: Step 3 of the 2026-05-27 slice-collapse plan replaces the
+    // `framesInScene` slice with a memoized selector over
+    // `state.gpsData.odometryPath.points`. The library reducer NUE-converts
+    // the WebXR pose on the way in (see gpsDataSlice.ts add2dImage), so this
+    // selector must convert back to WebXR for the visualizer that lives in
+    // the live WebXR scene.
+
+    /** Build a state with `odometryPath.points` set to NUE-converted entries. */
+    function makeStateWithPoints(points: ArImageCapture[]): CombinedRootState {
+      const gpsData = makeGpsData();
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any, @typescript-eslint/no-unsafe-member-access -- test-only override of opaque state
+      (gpsData as any).odometryPath = { points };
+      return makeState(gpsData);
+    }
+
+    it('returns a stable empty array when gpsData is null', () => {
+      const state = makeState(null);
+      const a = selectFrameTilesInWebXR(state);
+      const b = selectFrameTilesInWebXR(state);
+      expect(a).toEqual([]);
+      expect(a).toBe(b);
+    });
+
+    it('returns a stable empty array when odometryPath.points is empty', () => {
+      const state = makeStateWithPoints([]);
+      const a = selectFrameTilesInWebXR(state);
+      const b = selectFrameTilesInWebXR(state);
+      expect(a).toEqual([]);
+      expect(a).toBe(b);
+    });
+
+    it('converts each NUE-stored entry back to WebXR coordinates', () => {
+      // Round-trip: nueToWebXR(webxrToNUE([1,2,-3])) === [1,2,-3]
+      const webxrPosition: [number, number, number] = [1, 2, -3];
+      const webxrRotation = normalizeQuaternion([0.1, 0.2, 0.3, 0.9]);
+      const nueEntry: ArImageCapture = {
+        imageFile: 'frames/frame-000001.jpg',
+        position: webxrToNUE(webxrPosition),
+        rotation: normalizeQuaternion(webxrQuaternionToNUE(webxrRotation)),
+        screenRotation: 90,
+        capturedAt: 1_700_000_000_000,
+      };
+
+      const state = makeStateWithPoints([nueEntry]);
+      const tiles = selectFrameTilesInWebXR(state);
+
+      expect(tiles).toHaveLength(1);
+      const tile = tiles[0];
+      expect(tile).toBeDefined();
+      if (!tile) return;
+      expect(tile.imageFile).toBe('frames/frame-000001.jpg');
+      expect(tile.position[0]).toBeCloseTo(webxrPosition[0]);
+      expect(tile.position[1]).toBeCloseTo(webxrPosition[1]);
+      expect(tile.position[2]).toBeCloseTo(webxrPosition[2]);
+      expect(tile.rotation[0]).toBeCloseTo(webxrRotation[0]);
+      expect(tile.rotation[1]).toBeCloseTo(webxrRotation[1]);
+      expect(tile.rotation[2]).toBeCloseTo(webxrRotation[2]);
+      expect(tile.rotation[3]).toBeCloseTo(webxrRotation[3]);
+      expect(tile.screenRotation).toBe(90);
+      expect(tile.capturedAt).toBe(1_700_000_000_000);
+    });
+
+    it('preserves arrival order', () => {
+      const points: ArImageCapture[] = [1, 2, 3].map((i) => ({
+        imageFile: `frames/frame-${String(i).padStart(6, '0')}.jpg`,
+        position: webxrToNUE([i, 0, 0]),
+        rotation: normalizeQuaternion(webxrQuaternionToNUE([0, 0, 0, 1])),
+        screenRotation: 0,
+        capturedAt: 1_700_000_000_000 + i,
+      }));
+      const state = makeStateWithPoints(points);
+      const tiles = selectFrameTilesInWebXR(state);
+      expect(tiles.map((t) => t.imageFile)).toEqual([
+        'frames/frame-000001.jpg',
+        'frames/frame-000002.jpg',
+        'frames/frame-000003.jpg',
+      ]);
+    });
+
+    it('returns the same reference when called twice with the same state', () => {
+      // Why: wireFrameTileSubscribers relies on reference equality to skip
+      // unchanged selector outputs.
+      const state = makeStateWithPoints([
+        {
+          imageFile: 'frames/frame-000001.jpg',
+          position: webxrToNUE([1, 0, 0]),
+          rotation: normalizeQuaternion(webxrQuaternionToNUE([0, 0, 0, 1])),
+          screenRotation: 0,
+        },
+      ]);
+      const a = selectFrameTilesInWebXR(state);
+      const b = selectFrameTilesInWebXR(state);
+      expect(a).toBe(b);
+    });
+
+    it('returns a new reference when odometryPath.points changes', () => {
+      const state1 = makeStateWithPoints([
+        {
+          imageFile: 'a.jpg',
+          position: webxrToNUE([1, 0, 0]),
+          rotation: normalizeQuaternion(webxrQuaternionToNUE([0, 0, 0, 1])),
+          screenRotation: 0,
+        },
+      ]);
+      const result1 = selectFrameTilesInWebXR(state1);
+
+      const state2 = makeStateWithPoints([
+        ...(state1.gpsData?.odometryPath.points ?? []),
+        {
+          imageFile: 'b.jpg',
+          position: webxrToNUE([2, 0, 0]),
+          rotation: normalizeQuaternion(webxrQuaternionToNUE([0, 0, 0, 1])),
+          screenRotation: 0,
+        },
+      ]);
+      const result2 = selectFrameTilesInWebXR(state2);
+
+      expect(result1).not.toBe(result2);
+      expect(result2).toHaveLength(2);
+    });
+
+    it('returns the same reference when gpsData changes but points are unchanged', () => {
+      // Why: the library reducer uses Immer, so unrelated updates (GPS
+      // observations, VIO offsets) produce a NEW gpsData reference while
+      // odometryPath.points keeps its reference via structural sharing.
+      // Keying the selector on points (not the whole gpsData) preserves
+      // referential stability across those dispatches — otherwise
+      // wireFrameTileSubscribers would re-run on every GPS/VIO dispatch.
+      const points: ArImageCapture[] = [
+        {
+          imageFile: 'a.jpg',
+          position: webxrToNUE([1, 0, 0]),
+          rotation: normalizeQuaternion(webxrQuaternionToNUE([0, 0, 0, 1])),
+          screenRotation: 0,
+        },
+      ];
+      const state1 = makeStateWithPoints(points);
+      const result1 = selectFrameTilesInWebXR(state1);
+
+      // Simulate a GPS/VIO update: brand-new gpsData object reference, but the
+      // SAME points array reference (structural sharing).
+      const gpsData2 = makeGpsData();
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any, @typescript-eslint/no-unsafe-member-access -- test-only override of opaque state
+      (gpsData2 as any).odometryPath = { points };
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any, @typescript-eslint/no-unsafe-member-access -- mutate an unrelated branch
+      (gpsData2 as any).gpsEvents.gpsPositions = [{ id: 'new' }];
+      const state2 = makeState(gpsData2);
+
+      expect(state2.gpsData).not.toBe(state1.gpsData);
+      const result2 = selectFrameTilesInWebXR(state2);
+      expect(result2).toBe(result1);
     });
   });
 });

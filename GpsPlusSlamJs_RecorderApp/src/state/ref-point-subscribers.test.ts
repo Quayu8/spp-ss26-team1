@@ -1,30 +1,36 @@
 /**
  * Tests for wireRefPointSubscribers.
  *
- * These mirror the previously-framework-owned `refPointVisualizer
- * subscription` invariants, recreated recorder-side after the Iter 3
- * boundary migration.
+ * Step 5.3 of 2026-05-27-collapse-refpoint-and-frame-slices-plan.md
+ * migrated this subscriber from the library's `selectReferencePoints`
+ * onto the recorder-side flat `selectRefPointEntries` selector
+ * (`state.refPoints.entries`). The wirer must call
+ * `visualizer.syncRefPoints` once on attach (initial sync) and exactly
+ * once per change of the selector's memoised result, and must not fire
+ * when the selector returns the same reference twice in a row.
  */
 
 import { describe, it, expect, vi } from 'vitest';
 import { wireRefPointSubscribers } from './ref-point-subscribers';
 import type { RecorderStore } from './recorder-store';
-import type { RefPointMark } from '../storage/ref-point-loader';
+import type { RefPointEntry } from './ref-points-slice';
 
 interface MockState {
-  refPoints: {
-    priorMarks: RefPointMark[];
-    currentMarks: RefPointMark[];
-  };
+  // Only the shape the selector reads from.
+  refPoints: { entries: readonly RefPointEntry[] };
 }
 
-function makeMark(id: string, timestamp = 0): RefPointMark {
+function makeEntry(id: string, timestamp = 0): RefPointEntry {
   return {
     id,
-    odomPosition: [0, 0, 0],
-    odomRotation: [0, 0, 0, 1],
-    gpsPosition: { lat: 50, lon: 8, altitude: 245 },
     timestamp,
+    rawGpsPoint: {
+      id: `gps-${id}`,
+      latitude: 50,
+      longitude: 8,
+      altitude: 245,
+      timestamp,
+    },
   };
 }
 
@@ -49,74 +55,69 @@ function makeMockStore(initial: MockState) {
 
 function makeVisualizer() {
   return {
-    displayPriorRefPoints: vi.fn(),
-    addCurrentRefPoint: vi.fn(),
+    syncRefPoints: vi.fn(),
   };
 }
 
 describe('wireRefPointSubscribers', () => {
-  it('renders prior marks once per priorMarks change', () => {
+  it('performs an initial sync on attach', () => {
     const v = makeVisualizer();
-    const { store, setState } = makeMockStore({
-      refPoints: { priorMarks: [], currentMarks: [] },
+    const a = makeEntry('a', 1);
+    const { store } = makeMockStore({
+      refPoints: { entries: [a] },
     });
+
     wireRefPointSubscribers(store, v);
 
-    const marks = [makeMark('a', 1), makeMark('b', 2)];
-    setState({ refPoints: { priorMarks: marks, currentMarks: [] } });
-
-    expect(v.displayPriorRefPoints).toHaveBeenCalledTimes(1);
-    expect(v.displayPriorRefPoints).toHaveBeenCalledWith(marks);
-    expect(v.addCurrentRefPoint).not.toHaveBeenCalled();
+    expect(v.syncRefPoints).toHaveBeenCalledTimes(1);
+    expect(v.syncRefPoints).toHaveBeenLastCalledWith([a]);
   });
 
-  it('appends one currentMark per dispatch', () => {
+  it('syncs again when the selector result reference changes', () => {
     const v = makeVisualizer();
     const { store, setState } = makeMockStore({
-      refPoints: { priorMarks: [], currentMarks: [] },
+      refPoints: { entries: [] },
     });
     wireRefPointSubscribers(store, v);
+    expect(v.syncRefPoints).toHaveBeenCalledTimes(1);
 
-    const m1 = makeMark('live-1', 1);
-    const m2 = makeMark('live-2', 2);
+    const a = makeEntry('a', 1);
+    setState({ refPoints: { entries: [a] } });
+    expect(v.syncRefPoints).toHaveBeenCalledTimes(2);
+    expect(v.syncRefPoints).toHaveBeenLastCalledWith([a]);
 
-    setState({ refPoints: { priorMarks: [], currentMarks: [m1] } });
-    expect(v.addCurrentRefPoint).toHaveBeenCalledTimes(1);
-    expect(v.addCurrentRefPoint).toHaveBeenLastCalledWith(m1);
-
-    setState({ refPoints: { priorMarks: [], currentMarks: [m1, m2] } });
-    expect(v.addCurrentRefPoint).toHaveBeenCalledTimes(2);
-    expect(v.addCurrentRefPoint).toHaveBeenLastCalledWith(m2);
+    const b = makeEntry('b', 2);
+    setState({ refPoints: { entries: [a, b] } });
+    expect(v.syncRefPoints).toHaveBeenCalledTimes(3);
+    expect(v.syncRefPoints).toHaveBeenLastCalledWith([a, b]);
   });
 
-  it('resets the high-water mark when currentMarks is cleared', () => {
+  it('does not sync when the selector returns the same reference', () => {
     const v = makeVisualizer();
-    const { store, setState } = makeMockStore({
-      refPoints: { priorMarks: [], currentMarks: [] },
-    });
+    const refPoints = { entries: [makeEntry('a', 1)] };
+    const { store, setState } = makeMockStore({ refPoints });
     wireRefPointSubscribers(store, v);
+    expect(v.syncRefPoints).toHaveBeenCalledTimes(1);
 
-    const m1 = makeMark('live-1', 1);
-    const m2 = makeMark('live-2', 2);
+    // Top-level state object changes but `refPoints` reference is
+    // reused → `selectRefPointEntries` (a `createSelector`) returns the
+    // same memoised array, so the wirer must not re-dispatch.
+    setState({ refPoints });
+    expect(v.syncRefPoints).toHaveBeenCalledTimes(1);
 
-    setState({ refPoints: { priorMarks: [], currentMarks: [m1, m2] } });
-    expect(v.addCurrentRefPoint).toHaveBeenCalledTimes(2);
-
-    setState({ refPoints: { priorMarks: [], currentMarks: [] } });
-    setState({ refPoints: { priorMarks: [], currentMarks: [m1] } });
-    expect(v.addCurrentRefPoint).toHaveBeenCalledTimes(3);
-    expect(v.addCurrentRefPoint).toHaveBeenLastCalledWith(m1);
+    setState({ refPoints });
+    expect(v.syncRefPoints).toHaveBeenCalledTimes(1);
   });
 
   it('is a no-op when visualizer is null', () => {
     const { store, setState } = makeMockStore({
-      refPoints: { priorMarks: [], currentMarks: [] },
+      refPoints: { entries: [] },
     });
     const unsubscribe = wireRefPointSubscribers(store, null);
     expect(typeof unsubscribe).toBe('function');
     expect(() => {
       setState({
-        refPoints: { priorMarks: [makeMark('x', 1)], currentMarks: [] },
+        refPoints: { entries: [makeEntry('x', 1)] },
       });
     }).not.toThrow();
     unsubscribe();
@@ -125,14 +126,15 @@ describe('wireRefPointSubscribers', () => {
   it('returned unsubscribe detaches the store listener', () => {
     const v = makeVisualizer();
     const { store, setState } = makeMockStore({
-      refPoints: { priorMarks: [], currentMarks: [] },
+      refPoints: { entries: [] },
     });
     const unsubscribe = wireRefPointSubscribers(store, v);
+    expect(v.syncRefPoints).toHaveBeenCalledTimes(1);
     unsubscribe();
 
     setState({
-      refPoints: { priorMarks: [makeMark('p', 1)], currentMarks: [] },
+      refPoints: { entries: [makeEntry('p', 1)] },
     });
-    expect(v.displayPriorRefPoints).not.toHaveBeenCalled();
+    expect(v.syncRefPoints).toHaveBeenCalledTimes(1);
   });
 });

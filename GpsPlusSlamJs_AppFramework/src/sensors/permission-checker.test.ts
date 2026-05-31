@@ -13,6 +13,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import type { PermissionCheckResult } from './permission-checker';
 import {
   checkWebXRSupport,
   checkGeolocationPermission,
@@ -790,6 +791,261 @@ describe('permission-checker', () => {
       expect(result.supported).toBe(true);
       expect(result.granted).toBe(false);
       expect(result.error).toContain('write failed');
+    });
+  });
+
+  /**
+   * Tests for subscribePermissionChanges — the recorder app must learn
+   * about out-of-band permission flips (user toggling location in browser
+   * settings) without a page reload. See
+   * docs/2026-05-03-setup-screen-defaults-and-permission-rerequest.md
+   * (Issue 2). The subscription wires the PermissionStatus `'change'` event
+   * plus `document.visibilitychange` / `window.focus` fallbacks.
+   */
+  describe('subscribePermissionChanges', () => {
+    // A minimal `PermissionStatus` fake. The production code attaches a
+    // `'change'` listener via `addEventListener` (PermissionStatus extends
+    // EventTarget), so the fake records change listeners and exposes
+    // `fireChange()` to simulate the browser dispatching the event.
+    interface FakePermissionStatus {
+      state: 'granted' | 'denied' | 'prompt';
+      addEventListener(type: string, handler: () => void): void;
+      removeEventListener(type: string, handler: () => void): void;
+      fireChange(): void;
+    }
+
+    function makeFakeStatus(
+      initial: 'granted' | 'denied' | 'prompt'
+    ): FakePermissionStatus {
+      const handlers = new Set<() => void>();
+      return {
+        state: initial,
+        addEventListener(type, handler): void {
+          if (type === 'change') handlers.add(handler);
+        },
+        removeEventListener(type, handler): void {
+          if (type === 'change') handlers.delete(handler);
+        },
+        fireChange(): void {
+          for (const h of handlers) h();
+        },
+      };
+    }
+
+    // Why: The primary signal for in-page detection of permission flips is
+    // the PermissionStatus `'change'` event. Firing it must trigger the
+    // callback with a freshly computed `PermissionCheckResult`.
+    it('invokes callback when geolocation PermissionStatus change event fires', async () => {
+      const geoStatus = makeFakeStatus('denied');
+      const camStatus = makeFakeStatus('granted');
+      vi.stubGlobal('navigator', {
+        geolocation: {
+          getCurrentPosition: vi.fn(),
+        },
+        mediaDevices: { getUserMedia: vi.fn() },
+        xr: { isSessionSupported: vi.fn().mockResolvedValue(true) },
+        storage: { getDirectory: vi.fn() },
+        permissions: {
+          query: vi.fn().mockImplementation((desc: { name: string }) => {
+            if (desc.name === 'geolocation') return Promise.resolve(geoStatus);
+            if (desc.name === 'camera') return Promise.resolve(camStatus);
+            return Promise.reject(new Error('not supported'));
+          }),
+        },
+      });
+      (
+        globalThis as unknown as Record<string, unknown>
+      ).DeviceOrientationEvent = class {};
+
+      const { subscribePermissionChanges } =
+        await import('./permission-checker');
+      const callback = vi.fn();
+      const sub = subscribePermissionChanges(callback);
+      // Wait for the initial query promises to resolve so the change
+      // listener is wired.
+      await new Promise((r) => setTimeout(r, 0));
+
+      callback.mockClear();
+      // Simulate the user flipping location to granted via browser settings.
+      geoStatus.state = 'granted';
+      geoStatus.fireChange();
+      await new Promise((r) => setTimeout(r, 0));
+
+      expect(callback).toHaveBeenCalled();
+      const lastResult = callback.mock.calls.at(
+        -1
+      )![0] as PermissionCheckResult;
+      expect(lastResult.geolocation.granted).toBe(true);
+
+      sub.unsubscribe();
+    });
+
+    // Why: Some browsers don't fire the PermissionStatus `'change'` event
+    // reliably (e.g. when the tab was backgrounded during the change). The
+    // `visibilitychange` fallback covers the "user tabbed out to settings,
+    // toggled, tabbed back" scenario.
+    it('re-checks on document visibilitychange (visible)', async () => {
+      const geoStatus = makeFakeStatus('denied');
+      const camStatus = makeFakeStatus('granted');
+      vi.stubGlobal('navigator', {
+        geolocation: { getCurrentPosition: vi.fn() },
+        mediaDevices: { getUserMedia: vi.fn() },
+        xr: { isSessionSupported: vi.fn().mockResolvedValue(true) },
+        storage: { getDirectory: vi.fn() },
+        permissions: {
+          query: vi.fn().mockImplementation((desc: { name: string }) => {
+            if (desc.name === 'geolocation') return Promise.resolve(geoStatus);
+            if (desc.name === 'camera') return Promise.resolve(camStatus);
+            return Promise.reject(new Error('not supported'));
+          }),
+        },
+      });
+      (
+        globalThis as unknown as Record<string, unknown>
+      ).DeviceOrientationEvent = class {};
+
+      const { subscribePermissionChanges } =
+        await import('./permission-checker');
+      const callback = vi.fn();
+      const sub = subscribePermissionChanges(callback);
+      await new Promise((r) => setTimeout(r, 0));
+
+      callback.mockClear();
+      Object.defineProperty(document, 'visibilityState', {
+        configurable: true,
+        get: () => 'visible',
+      });
+      geoStatus.state = 'granted';
+      document.dispatchEvent(new Event('visibilitychange'));
+      await new Promise((r) => setTimeout(r, 0));
+
+      expect(callback).toHaveBeenCalled();
+      const lastResult = callback.mock.calls.at(
+        -1
+      )![0] as PermissionCheckResult;
+      expect(lastResult.geolocation.granted).toBe(true);
+
+      sub.unsubscribe();
+    });
+
+    // Why: visibilitychange firing with state 'hidden' (user just tabbed
+    // away) tells us nothing useful and should not re-check — re-checking
+    // there would just spam getCurrentPosition / queries.
+    it('does NOT re-check on visibilitychange when state is hidden', async () => {
+      const geoStatus = makeFakeStatus('granted');
+      const camStatus = makeFakeStatus('granted');
+      vi.stubGlobal('navigator', {
+        geolocation: { getCurrentPosition: vi.fn() },
+        mediaDevices: { getUserMedia: vi.fn() },
+        xr: { isSessionSupported: vi.fn().mockResolvedValue(true) },
+        storage: { getDirectory: vi.fn() },
+        permissions: {
+          query: vi.fn().mockImplementation((desc: { name: string }) => {
+            if (desc.name === 'geolocation') return Promise.resolve(geoStatus);
+            if (desc.name === 'camera') return Promise.resolve(camStatus);
+            return Promise.reject(new Error('not supported'));
+          }),
+        },
+      });
+      (
+        globalThis as unknown as Record<string, unknown>
+      ).DeviceOrientationEvent = class {};
+
+      const { subscribePermissionChanges } =
+        await import('./permission-checker');
+      const callback = vi.fn();
+      const sub = subscribePermissionChanges(callback);
+      await new Promise((r) => setTimeout(r, 0));
+
+      callback.mockClear();
+      Object.defineProperty(document, 'visibilityState', {
+        configurable: true,
+        get: () => 'hidden',
+      });
+      document.dispatchEvent(new Event('visibilitychange'));
+      await new Promise((r) => setTimeout(r, 0));
+
+      expect(callback).not.toHaveBeenCalled();
+
+      sub.unsubscribe();
+    });
+
+    // Why: After unsubscribe, neither onchange nor visibilitychange must
+    // continue to invoke the callback — otherwise we'd leak listeners on
+    // long-lived pages.
+    it('stops firing callbacks after unsubscribe()', async () => {
+      const geoStatus = makeFakeStatus('denied');
+      const camStatus = makeFakeStatus('granted');
+      vi.stubGlobal('navigator', {
+        geolocation: { getCurrentPosition: vi.fn() },
+        mediaDevices: { getUserMedia: vi.fn() },
+        xr: { isSessionSupported: vi.fn().mockResolvedValue(true) },
+        storage: { getDirectory: vi.fn() },
+        permissions: {
+          query: vi.fn().mockImplementation((desc: { name: string }) => {
+            if (desc.name === 'geolocation') return Promise.resolve(geoStatus);
+            if (desc.name === 'camera') return Promise.resolve(camStatus);
+            return Promise.reject(new Error('not supported'));
+          }),
+        },
+      });
+      (
+        globalThis as unknown as Record<string, unknown>
+      ).DeviceOrientationEvent = class {};
+
+      const { subscribePermissionChanges } =
+        await import('./permission-checker');
+      const callback = vi.fn();
+      const sub = subscribePermissionChanges(callback);
+      await new Promise((r) => setTimeout(r, 0));
+
+      sub.unsubscribe();
+      callback.mockClear();
+
+      geoStatus.state = 'granted';
+      geoStatus.fireChange();
+      Object.defineProperty(document, 'visibilityState', {
+        configurable: true,
+        get: () => 'visible',
+      });
+      document.dispatchEvent(new Event('visibilitychange'));
+      await new Promise((r) => setTimeout(r, 0));
+
+      expect(callback).not.toHaveBeenCalled();
+    });
+
+    // Why: Browsers without the Permissions API (or with no support for the
+    // queried name) must not break the subscription — visibilitychange /
+    // focus fallback should still be wired.
+    it('still wires visibilitychange when Permissions API is unavailable', async () => {
+      vi.stubGlobal('navigator', {
+        geolocation: { getCurrentPosition: vi.fn() },
+        mediaDevices: { getUserMedia: vi.fn() },
+        xr: { isSessionSupported: vi.fn().mockResolvedValue(true) },
+        storage: { getDirectory: vi.fn() },
+        // No `permissions` property.
+      });
+      (
+        globalThis as unknown as Record<string, unknown>
+      ).DeviceOrientationEvent = class {};
+
+      const { subscribePermissionChanges } =
+        await import('./permission-checker');
+      const callback = vi.fn();
+      const sub = subscribePermissionChanges(callback);
+      await new Promise((r) => setTimeout(r, 0));
+
+      callback.mockClear();
+      Object.defineProperty(document, 'visibilityState', {
+        configurable: true,
+        get: () => 'visible',
+      });
+      document.dispatchEvent(new Event('visibilitychange'));
+      await new Promise((r) => setTimeout(r, 0));
+
+      expect(callback).toHaveBeenCalled();
+
+      sub.unsubscribe();
     });
   });
 });

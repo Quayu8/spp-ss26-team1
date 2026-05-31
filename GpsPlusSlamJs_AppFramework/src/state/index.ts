@@ -14,6 +14,28 @@ export {
   recordingReducer,
 } from './recording-slice.js';
 
+// --- tracking-slice (AR tracking state machine; ports the AR-tracking
+//     state machine that previously lived in `ar/tracking-state.ts` — see
+//     P2 step 2 in 2026-05-07-csharp-features-not-yet-ported.md). ---
+export {
+  type TrackingPhase,
+  type TrackingSliceState,
+  type DeviceOrientation,
+  type ResetTransformData,
+  type PoseReceivedPayload,
+  poseReceived,
+  poseLost,
+  originReset,
+  resetTracking,
+  clearLastRestartedPayload,
+  trackingReducer,
+  selectTrackingPhase,
+  selectLastValidPose,
+  selectLostFrameCount,
+  selectLastRestartedPayload,
+  selectLastSensorOrientation,
+} from './tracking-slice.js';
+
 // --- ref-points-slice — moved to recorder app in Iter 3 of the
 //     AppFramework / RecorderApp boundary migration. Recorder consumers
 //     import these from their own local slice now. ---
@@ -24,7 +46,6 @@ export {
   setZeroPos,
   recordGpsEvent,
   add2dImage,
-  markReferencePoint,
   calcRelativeCoordsInMeters,
 } from 'gps-plus-slam-js';
 export type {
@@ -33,7 +54,7 @@ export type {
   RawGpsPoint,
   RawDeviceOrientation,
   RecordGpsEventPayload,
-  MarkReferencePointPayload,
+  Add2dImagePayload,
 } from 'gps-plus-slam-js';
 export type { DepthPoint, DepthSample } from '../types/ar-types.js';
 export type { StorageBackend } from '../storage/storage-backend.js';
@@ -86,6 +107,7 @@ export type { ReplayRecordingOptions } from './recording-replayer.js';
 // --- persistence-middleware ---
 export {
   createPersistenceMiddleware,
+  slicePrefixOf,
   type PersistenceMiddlewareOptions,
 } from './persistence-middleware.js';
 
@@ -129,5 +151,35 @@ export {
   selectOdometryPositions,
   selectOdometryRotations,
   selectZeroReference,
-  selectReferencePoints,
+  selectFrameTilesInWebXR,
 } from './app-selectors.js';
+
+// --- tracking-quality (Phase A of
+//     docs/2026-05-16-tracking-quality-metrics-plan.md) ---
+export {
+  trackingQualityReducer,
+  createTrackingQualityListenerMiddleware,
+  computeTrackingQualityReport,
+  computeConvergence,
+  computeResidualConsensus,
+  computeCompassAgreement,
+  computeGpsAccuracy,
+  computeCoverage,
+  computeGpsVsFusedDivergence,
+  matrixDelta,
+  snapshotPushed,
+  snapshotsTrimmed,
+  reportUpdated,
+  resetTrackingQuality,
+  firstAgreementReached,
+  degradedCountUpdated,
+  selectTrackingQuality,
+  selectRecentAlignments,
+  selectFirstAgreementObservationIndex,
+  DEFAULT_TRACKING_QUALITY_OPTIONS,
+  type TrackingQualityState,
+  type TrackingQualityReport,
+  type TrackingQualityOptions,
+  type TrackingQualitySliceState,
+  type AlignmentSnapshot,
+} from './tracking-quality.js';

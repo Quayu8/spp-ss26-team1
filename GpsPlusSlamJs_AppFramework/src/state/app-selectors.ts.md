@@ -6,26 +6,23 @@ App-level memoized selectors wrapping library getter functions with `createSelec
 
 ## Public API
 
-| Symbol                       | Signature                                                 | Returns                                       |
-| ---------------------------- | --------------------------------------------------------- | --------------------------------------------- |
-| `selectAlignmentMatrix`      | `(state: CombinedRootState) => Matrix4 \| null`           | 4×4 alignment matrix, or null                 |
-| `selectGpsPositions`         | `(state: CombinedRootState) => readonly GpsPoint[]`       | Recorded GPS positions with metadata          |
-| `selectOdometryPositions`    | `(state: CombinedRootState) => readonly Vector3[]`        | Odometry positions (AR-local space)           |
-| `selectOdometryRotations`    | `(state: CombinedRootState) => readonly Quaternion[]`     | Odometry rotations (AR-local space)           |
-| `selectZeroReference`        | `(state: CombinedRootState) => LatLong \| null`           | GPS origin for coordinate conversion          |
-| `selectReferencePoints`      | `(state: CombinedRootState) => readonly ReferencePoint[]` | User-defined ground truth reference points    |
-| `selectPriorRefPointMarks`   | `(state: CombinedRootState) => readonly RefPointMark[]`   | Prior-session marks (Finding 5, 2026-04-30)   |
-| `selectCurrentRefPointMarks` | `(state: CombinedRootState) => readonly RefPointMark[]`   | Current-session marks (Finding 5, 2026-04-30) |
-| `selectRefPoints`            | `(state: CombinedRootState) => RefPointsState`            | Composition helper for the slice as a whole   |
+| Symbol                    | Signature                                             | Returns                              |
+| ------------------------- | ----------------------------------------------------- | ------------------------------------ |
+| `selectAlignmentMatrix`   | `(state: CombinedRootState) => Matrix4 \| null`       | 4×4 alignment matrix, or null        |
+| `selectGpsPositions`      | `(state: CombinedRootState) => readonly GpsPoint[]`   | Recorded GPS positions with metadata |
+| `selectOdometryPositions` | `(state: CombinedRootState) => readonly Vector3[]`    | Odometry positions (AR-local space)  |
+| `selectOdometryRotations` | `(state: CombinedRootState) => readonly Quaternion[]` | Odometry rotations (AR-local space)  |
+| `selectZeroReference`     | `(state: CombinedRootState) => LatLong \| null`       | GPS origin for coordinate conversion |
 
-All selectors use `state.gpsData` as the input dependency for `createSelector` memoization. If `gpsData` reference hasn't changed between calls, the cached result is returned without re-evaluating.
+Most selectors use `state.gpsData` as the input dependency for `createSelector` memoization. If `gpsData` reference hasn't changed between calls, the cached result is returned without re-evaluating.
+
+`selectFrameTilesInWebXR` is the exception: it keys on `state.gpsData?.odometryPath?.points` (not the whole `gpsData`). Because the library reducer uses Immer, unrelated updates (GPS observations, VIO offsets) yield a new `gpsData` reference while `odometryPath.points` keeps its reference via structural sharing. Keying on the points array preserves referential stability of the output across those dispatches, so `wireFrameTileSubscribers` only re-runs when frames actually change.
 
 ## Invariants & Assumptions
 
-- Selectors return module-level empty array constants when `gpsData` is null, ensuring stable references for `subscribeToSelector` change detection.
+- Selectors return module-level empty array constants when `gpsData` (or `odometryPath.points`) is null, ensuring stable references for `subscribeToSelector` change detection.
 - All selectors replicate the same property access as the library's getter functions (`getAlignmentMatrix`, `getGpsPositions`, etc.) but with `CombinedRootState` typing and `createSelector` memoization.
 - The `gpsData` property path is part of the library's public `GpsSlamState` interface.
-- `selectPriorRefPointMarks` / `selectCurrentRefPointMarks` use deep input selectors (`state.refPoints?.priorMarks` / `?.currentMarks`) so the memoization fires only when those specific arrays change — not on unrelated `refPoints` slice updates such as `sessionRefPointUsage`.
 
 ## Examples
 
@@ -49,4 +46,4 @@ Covered by `app-selectors.test.ts` (13 test cases):
 - [subscribe-to-selector.ts](subscribe-to-selector.ts) — uses these selectors for change detection
 - [store-subscribers.ts](store-subscribers.ts) — primary consumer
 - [store.ts](store.ts) — `CombinedRootState` type definition
-- [ref-points-slice.ts](ref-points-slice.ts) — `selectCachedKnownRefPoints` follows the same pattern
+- [ref-points-slice.ts](ref-points-slice.ts) — `selectImportedKnownAnchors` follows the same pattern

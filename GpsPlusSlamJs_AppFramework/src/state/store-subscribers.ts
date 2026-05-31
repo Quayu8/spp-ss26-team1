@@ -19,7 +19,8 @@
 import type { LatLong, Matrix4, Vector3, Quaternion } from 'gps-plus-slam-js';
 import { calcGpsCoords } from 'gps-plus-slam-js';
 import { vec3, mat4 } from 'gl-matrix';
-import { fusedGpsFromOdom } from '../utils/fused-path';
+import { buildMapData, type MapData } from '../visualization/map-data';
+import type { GpsCoord } from '../types/geo-types';
 import {
   subscribeToSelector,
   type SubscribableStore,
@@ -48,16 +49,30 @@ export interface StoreSubscriberDeps {
   gpsEventVisualizer: {
     getZeroRef: () => LatLong | null;
     setZeroRef: (zero: LatLong) => void;
-    addGpsEvent: (gpsCoords: Vector3, odomPosition: Vector3) => void;
+    addGpsEvent: (
+      gpsCoords: Vector3,
+      odomPosition: Vector3,
+      accuracy?: { horizontal?: number; vertical?: number }
+    ) => void;
     addAlignmentSnapshot: (nuePosition: Vector3) => void;
   };
 
-  /** Map overlay — updates the 2D map position. Nullable (not present in all modes). */
+  /**
+   * Map overlay — renders the shared trajectory snapshot. Nullable (not
+   * present in all modes).
+   *
+   * `setGpsPosition` centers the map on the latest fix; `render` draws the
+   * full {@link MapData} snapshot (raw GPS + accuracy circles, fused path,
+   * alignment snapshots, user dot) via the shared `drawMapData` routine — the
+   * SAME one the 2D session-summary map uses, so the live and summary maps
+   * stay identical (unified-trajectory-map Phase 3). The previous incremental
+   * `addRawGpsPoint` / `addFusedPoint` / `addAlignmentSnapshot` API is gone:
+   * the fused path now recomputes from the latest matrix on every rebuild
+   * (D2), so the live polyline "snaps" as alignment improves.
+   */
   mapOverlay?: {
     setGpsPosition: (lat: number, lon: number) => void;
-    addRawGpsPoint?: (lat: number, lon: number) => void;
-    addFusedPoint?: (lat: number, lon: number) => void;
-    addAlignmentSnapshot?: (lat: number, lon: number) => void;
+    render?: (data: MapData) => void;
   } | null;
 
   /**
@@ -91,6 +106,18 @@ export interface StoreSubscriberDeps {
    * for dynamic button label updates.
    */
   onNewGpsLatLng?: (lat: number, lng: number) => void;
+
+  /**
+   * When `true`, the recorded GPS 1σ accuracies (`latLongAccuracy`,
+   * `altitudeAccuracy`) on each `GpsPoint` are forwarded to `addGpsEvent`
+   * so the raw-GPS marker renders as a non-uniform-scaled ellipsoid (see
+   * `gps-event-markers.ts` §3). When `false` (the default) the accuracies
+   * are dropped and the legacy fixed 8 cm sphere is used.
+   *
+   * Live recording leaves this `false` (large ellipsoids would distract the
+   * operator). Replay mode sets it to `true` so the diagnostic is visible.
+   */
+  showAccuracySpheres?: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -126,6 +153,38 @@ export function wireStoreSubscribers(
 
   const unsubs: Array<() => void> = [];
 
+  // Accumulated alignment-snapshot GPS positions (one per alignment-matrix
+  // change). Fed into the shared MapData snapshot so the live overlay draws
+  // the red snapshot polyline the same way the summary map does.
+  const alignmentSnapshotGps: GpsCoord[] = [];
+
+  /**
+   * Rebuild the full map snapshot from the current store state and hand it to
+   * the overlay's `render`. Called whenever the alignment matrix or the GPS
+   * positions change — the change-gated subscriptions below provide the
+   * throttling, so no extra debouncing is needed. The fused path is always
+   * recomputed from the latest matrix inside `buildMapData` (D2).
+   */
+  function rebuildMap(): void {
+    if (!deps.mapOverlay?.render) return;
+    const state = store.getState();
+    const gpsPositions = selectGpsPositions(state);
+    const rawGpsPath = gpsPositions.map((p) => ({
+      lat: p.latitude,
+      lng: p.longitude,
+      accuracy: p.latLongAccuracy,
+    }));
+    deps.mapOverlay.render(
+      buildMapData({
+        rawGpsPath,
+        odometryPositions: selectOdometryPositions(state),
+        alignmentMatrix: selectAlignmentMatrix(state),
+        zeroRef: selectZeroReference(state),
+        alignmentSnapshots: alignmentSnapshotGps,
+      })
+    );
+  }
+
   // 1. Alignment matrix → apply to AR world group + capture snapshots
   unsubs.push(
     subscribeToSelector(store, selectAlignmentMatrix, (matrix) => {
@@ -148,13 +207,16 @@ export function wireStoreSubscribers(
         deps.gpsEventVisualizer.addAlignmentSnapshot(snapshotPos);
         deps.onAlignmentSnapshot?.(snapshotPos);
 
-        // Feed alignment snapshot to map overlay as GPS lat/lon (Phase 1b)
+        // Accumulate alignment snapshot as a GPS coord for the map overlay.
         const zeroRef = selectZeroReference(state);
-        if (zeroRef && deps.mapOverlay?.addAlignmentSnapshot) {
+        if (zeroRef) {
           const gps = calcGpsCoords(zeroRef, _alignedVec);
-          deps.mapOverlay.addAlignmentSnapshot(gps.lat, gps.lon);
+          alignmentSnapshotGps.push({ lat: gps.lat, lng: gps.lon });
         }
       }
+
+      // Matrix changed → fused path snaps; redraw the whole map snapshot.
+      rebuildMap();
     })
   );
 
@@ -181,23 +243,22 @@ export function wireStoreSubscribers(
           const gpsPoint = gpsPositions[i];
           const odomPos = odomPositions[i];
           if (gpsPoint && odomPos) {
-            deps.gpsEventVisualizer.addGpsEvent(gpsPoint.coordinates, odomPos);
+            // Forward 1σ accuracies only when the caller opts in (replay
+            // mode). Live recording keeps the legacy fixed sphere by passing
+            // `undefined` here.
+            const accuracy = deps.showAccuracySpheres
+              ? {
+                  horizontal: gpsPoint.latLongAccuracy,
+                  vertical: gpsPoint.altitudeAccuracy,
+                }
+              : undefined;
+            deps.gpsEventVisualizer.addGpsEvent(
+              gpsPoint.coordinates,
+              odomPos,
+              accuracy
+            );
             deps.onNewGpsPosition?.(gpsPoint.coordinates);
             deps.onNewGpsLatLng?.(gpsPoint.latitude, gpsPoint.longitude);
-
-            // Feed raw GPS point to map overlay (Approach E — Leaflet breadcrumb trail)
-            deps.mapOverlay?.addRawGpsPoint?.(
-              gpsPoint.latitude,
-              gpsPoint.longitude
-            );
-
-            // Feed fused GPS point to map overlay (Phase 1b — cyan polyline)
-            const alignmentMatrix = selectAlignmentMatrix(state);
-            const zero = selectZeroReference(state);
-            if (alignmentMatrix && zero && deps.mapOverlay?.addFusedPoint) {
-              const fusedGps = fusedGpsFromOdom(alignmentMatrix, odomPos, zero);
-              deps.mapOverlay.addFusedPoint(fusedGps.lat, fusedGps.lon);
-            }
 
             // Update arpose with recorded odom pose (replay mode)
             const odomRot = odomRotations[i];
@@ -207,7 +268,7 @@ export function wireStoreSubscribers(
           }
         }
 
-        // Update map overlay GPS position (latest GPS point)
+        // Update map overlay GPS position (latest GPS point) for centering…
         if (deps.mapOverlay && gpsPositions.length > 0) {
           const lastGpsPoint = gpsPositions[gpsPositions.length - 1]!;
           deps.mapOverlay.setGpsPosition(
@@ -215,6 +276,9 @@ export function wireStoreSubscribers(
             lastGpsPoint.longitude
           );
         }
+
+        // …then redraw the full trajectory snapshot.
+        rebuildMap();
       }
     )
   );

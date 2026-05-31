@@ -22,7 +22,9 @@ import {
   recordWriteFailure,
   setCurrentScenarioName,
   type RecorderStore,
+  type RawGpsPoint,
 } from './recorder-store';
+import { addRefPointEntry, type RefPointEntry } from './ref-points-slice';
 import { navigateTo } from './routing-slice';
 import { NullStorageBackend } from 'gps-plus-slam-app-framework/storage/null-storage-backend';
 
@@ -223,11 +225,15 @@ describe('Recorder Store', () => {
       const listener = vi.fn();
       store.subscribe(listener);
 
-      // Set zero position - this SHOULD trigger notification
+      // Set zero position - this SHOULD trigger notification.
+      // The tracking-quality listener middleware also fires follow-up
+      // dispatches (snapshotPushed, reportUpdated, etc.), so the
+      // subscriber is called more than once per user dispatch.
       store.dispatch(setZeroPos({ lat: 48.8566, lon: 2.3522 }));
-      expect(listener).toHaveBeenCalledTimes(1);
+      const afterZero = listener.mock.calls.length;
+      expect(afterZero).toBeGreaterThanOrEqual(1);
 
-      // Record GPS event - this SHOULD trigger notification
+      // Record GPS event - this SHOULD trigger additional notifications
       store.dispatch(
         recordGpsEvent({
           odomPosition: [1, 2, 3],
@@ -242,7 +248,7 @@ describe('Recorder Store', () => {
           },
         })
       );
-      expect(listener).toHaveBeenCalledTimes(2);
+      expect(listener.mock.calls.length).toBeGreaterThan(afterZero);
     });
 
     it('should allow multiple subscribers and unsubscribe correctly', () => {
@@ -252,10 +258,12 @@ describe('Recorder Store', () => {
       const unsubscribe1 = store.subscribe(listener1);
       store.subscribe(listener2);
 
-      // Both should be called
+      // Both should be called (middleware may add extra dispatches)
       store.dispatch(setZeroPos({ lat: 48.8566, lon: 2.3522 }));
-      expect(listener1).toHaveBeenCalledTimes(1);
-      expect(listener2).toHaveBeenCalledTimes(1);
+      const l1AfterZero = listener1.mock.calls.length;
+      const l2AfterZero = listener2.mock.calls.length;
+      expect(l1AfterZero).toBeGreaterThanOrEqual(1);
+      expect(l2AfterZero).toBeGreaterThanOrEqual(1);
 
       // Unsubscribe listener1
       unsubscribe1();
@@ -268,8 +276,8 @@ describe('Recorder Store', () => {
           startTime: Date.now(),
         })
       );
-      expect(listener1).toHaveBeenCalledTimes(1); // Still 1
-      expect(listener2).toHaveBeenCalledTimes(2); // Now 2
+      expect(listener1.mock.calls.length).toBe(l1AfterZero); // Unchanged
+      expect(listener2.mock.calls.length).toBeGreaterThan(l2AfterZero);
     });
   });
 
@@ -308,6 +316,59 @@ describe('Recorder Store', () => {
 
       expect(writeAction).toHaveBeenCalledWith(
         expect.objectContaining({ type: 'gpsData/setZeroPos' }),
+        expect.any(Number)
+      );
+    });
+
+    /**
+     * Why this test matters (regression guard for the F1 class of bugs):
+     * Live "Capture" marks are dispatched as `refPoints/addRefPointEntry`
+     * (the production slice name, see ref-points-slice.ts). Replay-mode
+     * hydrates marks from the persisted ACTION STREAM, not the OPFS sidecar
+     * — so if the framework's persistence middleware does not persist this
+     * action, freshly recorded sessions silently lose their ref-point marks
+     * on replay.
+     *
+     * This test wires the REAL `refPoints` slice and the REAL persistence
+     * middleware together via `createRecorderStore`, so a future rename of
+     * the slice (or a stale prefix in the middleware filter) cannot pass
+     * unnoticed. A middleware-only unit test that builds its own local
+     * slice cannot catch this drift because it never observes the
+     * production action type.
+     */
+    it('should persist refPoints/ mark actions when recording', async () => {
+      const { writeAction } =
+        await import('gps-plus-slam-app-framework/storage/file-system');
+
+      store.dispatch(
+        startSession({
+          scenarioName: 'Test',
+          sessionName: 'test-session',
+          startTime: Date.now(),
+        })
+      );
+      vi.mocked(writeAction).mockClear();
+
+      const rawGpsPoint: RawGpsPoint = {
+        id: 'gps-1',
+        latitude: 50.123,
+        longitude: 6.789,
+        altitude: 200,
+        latLongAccuracy: 4,
+        altitudeAccuracy: 3,
+        compassAbsolute: false,
+        timestamp: 1_700_000_000_000,
+      };
+      const entry: RefPointEntry = {
+        id: '8a1fb46622dffff',
+        timestamp: 1_700_000_000_000,
+        rawGpsPoint,
+      };
+
+      store.dispatch(addRefPointEntry(entry));
+
+      expect(writeAction).toHaveBeenCalledWith(
+        expect.objectContaining({ type: 'refPoints/addRefPointEntry' }),
         expect.any(Number)
       );
     });

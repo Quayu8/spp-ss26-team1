@@ -1,0 +1,179 @@
+# tracking-quality.ts
+
+## Purpose
+
+Phase A of the tracking-quality / GPS↔SLAM convergence reporter described in
+[docs/2026-05-16-tracking-quality-metrics-plan.md](../../../../../gps-plus-slam/GpsPlusSlamJs_Docs/docs/2026-05-16-tracking-quality-metrics-plan.md).
+Computes a single `TrackingQualityReport` from already-public Redux state
+(`gpsData`, `tracking`, `recording`) plus a small auxiliary slice
+(`trackingQuality`) that buffers the last N alignment matrices.
+
+Five sub-scores, each in `[0, 1]`, gate a single overall `confidence` value
+(`min(...)`):
+
+- **convergence** (§4.1) — how stable consecutive alignment matrices are.
+  Aggregated by **sum** (not max) across the last `matrixHistorySize - 1`
+  pairs in the ring buffer (Finding 6, 2026-05-23). The raw sums are
+  exposed on `diagnostics.recentSumRotationDeltaDeg` /
+  `recentSumTranslationDeltaM` and surfaced in the recorder HUD as
+  `ΣΔrot:` / `ΣΔpos:`.
+- **residualConsensus** (§4.2) — agreement between odometry-projected pose and
+  GPS fixes, normalised by `latLongAccuracy`.
+- **compassAgreement** (§4.3) — bearing the alignment claims vs. the absolute
+  compass reading (skipped when `absolute !== true`).
+- **gpsAccuracy** (§4.4) — median reported `latLongAccuracy` over the recent
+  K samples.
+- **coverage** (§4.5) — combination of walked distance and direction spread.
+
+Each sub-score is exposed alongside human-readable diagnostics. A coarse
+state machine collapses the score to `'warming-up' | 'ar-lost' | 'degraded' |
+'ok'`.
+
+## Public API
+
+- **Functions**
+  - `computeTrackingQualityReport(state, options?)` — pure aggregator over the
+    base `SlamAppRootState` (extended with `trackingQuality`).
+  - `computeConvergence(snapshots, options?)` / `matrixDelta(a, b)` — §4.1.
+  - `computeResidualConsensus(matrix, gps, odom, zeroRef, options?)` — §4.2.
+  - `computeCompassAgreement(matrix, sensorOrientation, arPose, options?)` —
+    §4.3.
+  - `computeGpsAccuracy(gpsPoints, options?)` — §4.4.
+  - `computeCoverage(odomPositions, options?)` — §4.5.
+  - `computeGpsVsFusedDivergence(...)` — §4.6 diagnostic only.
+  - `createTrackingQualityListenerMiddleware(options?)` — Redux listener that
+    buffers alignment matrices and recomputes the report on relevant actions.
+- **Reducer / actions**
+  - `trackingQualityReducer`.
+  - `snapshotPushed(AlignmentSnapshot)`, `snapshotsTrimmed({size})`,
+    `reportUpdated(report | null)`, `firstAgreementReached(observationIndex)`,
+    `degradedCountUpdated(count)`, `resetTrackingQuality()`.
+    (`smoothedConvergenceUpdated` is module-private — dispatched only by the
+    listener middleware; not part of the public action surface.)
+- **Selectors**
+  - `selectTrackingQuality(state)`, `selectRecentAlignments(state)`,
+    `selectFirstAgreementObservationIndex(state)`.
+- **Constants / types**
+  - `DEFAULT_TRACKING_QUALITY_OPTIONS` (corpus-derived values from the §6.1
+    parameter sweep — see plan §11 (c)/(d); locked by a regression test).
+  - `TrackingQualityState`, `TrackingQualityReport`, `TrackingQualityOptions`,
+    `AlignmentSnapshot`, `TrackingQualitySliceState`,
+    `ConvergenceResult`, `ResidualConsensusResult`, `GpsAccuracyResult`,
+    `CoverageResult`, `CompassAgreementResult`.
+
+All inputs are treated as **readonly**. Helpers never mutate arrays they
+receive — copies are taken before sorting or sliding-window operations.
+
+## Invariants & assumptions
+
+- `Matrix4` is column-major (per `fusedGpsFromOdom` in `gps-plus-slam-js`).
+- `Vector3` uses the library's NUE convention: `[north, up, east]` (metres).
+  Coverage / bearing math reads `[0]` as north and `[2]` as east; up is
+  ignored.
+- The reported AR-forward axis is the GL-camera convention `(0, 0, -1)`. This
+  matches the camera-quaternion rotation produced by WebXR and by
+  `recordGpsEvent`'s synthetic pose.
+- Listener middleware **defends against missing slice state** (`state.trackingQuality?`)
+  so it stays usable in tests/stores that only mount a subset of slices.
+- Listener middleware uses **shallow change detection** — `reportUpdated` is
+  only dispatched when the freshly-computed report differs from the previously
+  cached one (using `reportsEqual`).
+- `reportsEqual` compares float fields with **per-field tolerances**, not
+  strict `!==`: scores/confidence `1e-3`, angle diagnostics `0.01°`, metre
+  diagnostics `1 mm`. `tracking/poseReceived` fires every XR frame and the
+  §4.3 compass cross-check reads the live pose/heading, so without tolerances
+  imperceptible per-frame jitter would dispatch `reportUpdated` (and re-render
+  the HUD) at frame rate. The gate compares against the last _dispatched_
+  report, so slow real drift still triggers an update once it crosses a
+  tolerance — it cannot accumulate indefinitely.
+- Reset triggers (`recording/startSession`, `tracking/resetTracking`) clear
+  both the matrix buffer, the cached report, and the `degradedConsecutiveCount`.
+- Compass score returns `null` (and is excluded from `min`) when the device
+  doesn't report an absolute heading. This is by design — magnetometers on
+  iOS report `absolute === false` until a calibration succeeds.
+- `compassDriftDetected` only fires after the first-agreement detector has
+  established that compass and alignment once agreed (convergence high +
+  heading ≤ warn threshold for `firstAgreementMinStreak` consecutive
+  observations). Before first agreement, it is always `false`.
+- §4.8 hysteresis: the `ok → degraded` transition is held off for
+  `degradedHoldoff` (default 3) consecutive sub-threshold observations.
+  `degraded → ok` is immediate. `ar-lost` bypasses holdoff entirely.
+- §4.8b EMA-smoothed convergence (Finding 4): the convergence sub-score
+  reported by `computeTrackingQualityReport` is blended with the previously
+  persisted `smoothedConvergence` using `α = convergenceEmaAlpha`
+  (default `0.3`). On the first observation (`smoothedConvergence === null`)
+  the filter is seeded with the raw value. The listener middleware
+  dispatches `smoothedConvergenceUpdated` after every aggregator pass so
+  the next pass can blend against the latest value. `α = 1.0` disables
+  smoothing; `α → 0` makes the score effectively constant. The smoothed
+  value is the one surfaced on the report (and to the HUD); the raw value
+  is no longer exposed.
+- All sub-scores are clamped to `[0, 1]`; never `NaN` for empty input.
+- **All helper thresholds are forwarded from the aggregator.** Every seed
+  threshold in `TrackingQualityOptions` is passed through by
+  `computeTrackingQualityReport` (and the listener's first-agreement
+  detector) to the matching `compute*` helper, so overriding the store /
+  aggregator options actually takes effect. In particular
+  `convergenceRotationWarnDeg` / `convergenceTranslationWarnM` (§4.1) reach
+  `computeConvergence`, and `compassWarnDeg` / `compassFailDeg` (§4.3) reach
+  `computeCompassAgreement`. The helpers' own single-arg defaults fall back
+  to `DEFAULT_TRACKING_QUALITY_OPTIONS` so direct callers (e.g. the
+  Investigation harness) get the same calibrated values.
+
+## Defensive measures
+
+- `matrixDelta` validates length-16 matrices and returns zero deltas otherwise.
+  Internally uses `mat4.getRotation` + `quat.getAngle` + `mat4.getTranslation`
+  from gl-matrix — the same kernel as `computeStabilityDelta` in
+  `GpsPlusSlamJs_Investigation/src/investigation-helpers.ts`. Per the plan
+  §11 (a), these two functions share one numeric definition so the §6.1
+  corpus sweep's correlations are computed against the same kernel the
+  AppFramework reports at runtime. Numerical agreement is locked in by the
+  "matches the gl-matrix quat-based reference kernel" tests.
+- `computeResidualConsensus` returns score 0 (and `null` median) when alignment
+  matrix or zero reference is missing.
+- `computeGpsAccuracy` skips entries with non-finite `latLongAccuracy`.
+- `computeCoverage` handles zero or one odom samples and pure stand-still loops.
+- `computeCompassAgreement` returns all-null fields when the sensor isn't
+  absolute, the alignment matrix is missing, or the AR pose is unavailable.
+
+## Examples
+
+```ts
+import {
+  createTrackingQualityListenerMiddleware,
+  trackingQualityReducer,
+  selectTrackingQuality,
+} from 'gps-plus-slam-app-framework';
+
+const store = configureStore({
+  reducer: { /* ... */, trackingQuality: trackingQualityReducer },
+  middleware: (gdm) =>
+    gdm({ serializableCheck: false }).prepend(
+      createTrackingQualityListenerMiddleware()
+    ),
+});
+
+store.subscribe(() => {
+  const report = selectTrackingQuality(store.getState());
+  if (report?.state === 'ok') console.log('confidence:', report.confidence);
+});
+```
+
+## Tests
+
+- Co-located unit tests: [tracking-quality.test.ts](tracking-quality.test.ts) —
+  53 tests covering pure helpers, slice reducers, the aggregator
+  state-machine, anti-validation cases from plan §6, the listener
+  middleware contract, corpus-derived defaults regression (§11 (d)),
+  compassDriftDetected / first-agreement detector (§11 (e)), and
+  §4.8 hysteresis (§11 (f)).
+- Investigation sweep (Phase A (c)): `GpsPlusSlamJs_Investigation/src/investigations/tracking-quality.test.ts`
+  — 5 tests replaying the full `TestDataJs/` corpus (§6.1 sweep,
+  compass perturbation, anti-validation).
+
+## Related docs
+
+- Plan: [2026-05-16-tracking-quality-metrics-plan.md](../../../../../gps-plus-slam/GpsPlusSlamJs_Docs/docs/2026-05-16-tracking-quality-metrics-plan.md)
+- Rotation conventions: [2026-04-08-rotation-convention-plan.md](../../../../../gps-plus-slam/GpsPlusSlamJs_Docs/docs/2026-04-08-rotation-convention-plan.md)
+- Tracking slice: [tracking-slice.ts.md](tracking-slice.ts.md)

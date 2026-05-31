@@ -17,6 +17,7 @@ import {
   type RecordingOptions,
 } from 'gps-plus-slam-app-framework/state/recording-options';
 import type { StoreSubscriberDeps } from 'gps-plus-slam-app-framework/state/store-subscribers';
+import type { MapData } from 'gps-plus-slam-app-framework/visualization/map-data';
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -265,6 +266,7 @@ vi.mock('../ui/hud', () => ({
   showError: mockShowError,
   updateStatus: mockUpdateStatus,
   hideFrameCount: mockHideFrameCount,
+  hideTrackingQuality: vi.fn(),
   updateRefPointButtonLabel: vi.fn(),
   setNewRefPointButtonVisible: vi.fn(),
 }));
@@ -341,6 +343,7 @@ function createMockStore(): RecorderStore {
       scenario: {
         currentScenarioName: 'TestScenario',
       },
+      refPoints: { entries: [] },
     }),
     subscribe: vi.fn().mockReturnValue(() => {}),
     dispatch: vi.fn(),
@@ -371,7 +374,6 @@ function createMockDeps(
     createNewStore: vi.fn().mockReturnValue(createMockStore()),
     getRecordingOptions: () => defaultOptions,
     getMapOverlay: () => null,
-    clearRefPointUsage: vi.fn(),
     getSessionNotes: () => '',
     waitForZeroReference: vi.fn().mockResolvedValue(null),
     loadAndDisplayRefPoints: vi
@@ -379,6 +381,7 @@ function createMockDeps(
       .mockResolvedValue({ refPointCount: 0, observationCount: 0 }),
     collectTrackerErrors: vi.fn(),
     applyAlignmentMatrix: vi.fn(),
+    setTrackingStore: vi.fn(),
     ...overrides,
   };
 }
@@ -449,12 +452,6 @@ describe('handleStartRecording', () => {
     expect(mockGpsEventVisualizer.clearAll).toHaveBeenCalled();
   });
 
-  it('should clear ref point usage tracking', async () => {
-    // Why: Session-level ref point usage resets per recording
-    await handlers.handleStartRecording();
-    expect(deps.clearRefPointUsage).toHaveBeenCalled();
-  });
-
   it('should create a new store via deps', async () => {
     // Why: Each recording gets a fresh Redux store
     await handlers.handleStartRecording();
@@ -465,6 +462,24 @@ describe('handleStartRecording', () => {
     // Why: main.ts module-level store must be replaced
     await handlers.handleStartRecording();
     expect(deps.setStore).toHaveBeenCalled();
+  });
+
+  it('should re-point the AR session at the new store via setTrackingStore', async () => {
+    // Why (Finding #1, 2026-05-23 user feedback): when a recording starts a
+    // fresh Redux store, the WebXR session must be re-pointed at the new
+    // store. Otherwise `poseReceived` keeps flowing into the orphaned old
+    // store, the new store's `tracking.phase` stays 'initializing', and the
+    // tracking-quality phase gate keeps the HUD on "AR LOST" forever — the
+    // exact symptom reported in the field test.
+    const newStore = createMockStore();
+    const setTrackingStoreMock = vi.fn();
+    const localDeps = createMockDeps({
+      createNewStore: vi.fn().mockReturnValue(newStore),
+      setTrackingStore: setTrackingStoreMock,
+    });
+    const localHandlers = createRecordingSessionHandlers(localDeps);
+    await localHandlers.handleStartRecording();
+    expect(setTrackingStoreMock).toHaveBeenCalledWith(newStore);
   });
 
   it('should generate a session name from timestamp', async () => {
@@ -494,9 +509,7 @@ describe('handleStartRecording', () => {
     // getMapOverlay() on each invocation ensures late-created overlays work.
     const mockOverlay = {
       setGpsPosition: vi.fn(),
-      addRawGpsPoint: vi.fn(),
-      addFusedPoint: vi.fn(),
-      addAlignmentSnapshot: vi.fn(),
+      render: vi.fn<(data: MapData) => void>(),
       addCurrentMarker: vi.fn(),
     };
     // getMapOverlay returns null initially
@@ -517,11 +530,16 @@ describe('handleStartRecording', () => {
     expect(mapProxy).not.toBeNull();
     expect(mapProxy).toBeDefined();
 
+    const sampleMapData: MapData = {
+      userPosition: { lat: 50, lng: 8 },
+      rawGpsPath: [{ lat: 50, lng: 8 }],
+      fusedPath: [],
+      alignmentSnapshots: [],
+    };
+
     // Calling proxy methods when overlay is null should be safe (no-op)
     expect(() => mapProxy.setGpsPosition(50, 8)).not.toThrow();
-    expect(() => mapProxy.addRawGpsPoint(50, 8)).not.toThrow();
-    expect(() => mapProxy.addFusedPoint(50, 8)).not.toThrow();
-    expect(() => mapProxy.addAlignmentSnapshot(50, 8)).not.toThrow();
+    expect(() => mapProxy.render(sampleMapData)).not.toThrow();
     expect(() => mapProxy.addCurrentMarker(50, 8, 'RP1')).not.toThrow();
 
     // Now simulate the overlay being created (user tapped map button)
@@ -531,14 +549,8 @@ describe('handleStartRecording', () => {
     mapProxy.setGpsPosition(51, 9);
     expect(mockOverlay.setGpsPosition).toHaveBeenCalledWith(51, 9);
 
-    mapProxy.addRawGpsPoint(51.1, 9.1);
-    expect(mockOverlay.addRawGpsPoint).toHaveBeenCalledWith(51.1, 9.1);
-
-    mapProxy.addFusedPoint(51.2, 9.2);
-    expect(mockOverlay.addFusedPoint).toHaveBeenCalledWith(51.2, 9.2);
-
-    mapProxy.addAlignmentSnapshot(51.3, 9.3);
-    expect(mockOverlay.addAlignmentSnapshot).toHaveBeenCalledWith(51.3, 9.3);
+    mapProxy.render(sampleMapData);
+    expect(mockOverlay.render).toHaveBeenCalledWith(sampleMapData);
 
     mapProxy.addCurrentMarker(51.4, 9.4, 'RP2');
     expect(mockOverlay.addCurrentMarker).toHaveBeenCalledWith(51.4, 9.4, 'RP2');
@@ -1058,6 +1070,7 @@ describe('handleStopRecording', () => {
       scenario: {
         currentScenarioName: 'Test',
       },
+      refPoints: { entries: [] },
     });
 
     await handlers.handleStopRecording();

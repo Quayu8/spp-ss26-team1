@@ -41,6 +41,10 @@ vi.mock('gps-plus-slam-app-framework/storage/zip-reader', () => ({
   loadSessionMetadata: vi.fn().mockResolvedValue({ odomCoordVersion: 5 }), // era 5 — no migration needed
 }));
 
+vi.mock('../storage/recording-loader', () => ({
+  loadRecording: vi.fn(),
+}));
+
 vi.mock('gps-plus-slam-app-framework/state/store-subscribers', () => ({
   wireStoreSubscribers: vi.fn(() => vi.fn()), // returns unsubscribe fn
 }));
@@ -50,6 +54,7 @@ vi.mock('../state/recorder-store', () => ({
     getState: vi.fn(() => ({
       gpsData: null,
       recording: { isRecording: false },
+      refPoints: { entries: [] },
     })),
     dispatch: vi.fn(),
     subscribe: vi.fn(() => vi.fn()),
@@ -72,9 +77,37 @@ vi.mock('gps-plus-slam-app-framework/ar/webxr-session', () => ({
   nuePositionToWebXR: vi.fn((pos: readonly number[]) => pos),
 }));
 
+// F3.5c — mock the frame-tile wiring so replay-mode tests don't need a real
+// zip with frames/ entries. We assert against these mocks below.
+const mockFrameTileVisualizerDispose = vi.fn();
+const mockUnsubscribeFrameTiles = vi.fn();
+const mockFrameTileVisualizerCtor = vi.fn();
+vi.mock('../storage/zip-frame-blob-source', () => ({
+  createZipFrameBlobSource: vi
+    .fn()
+    .mockResolvedValue(() => Promise.resolve(null)),
+}));
+vi.mock('../visualization/frame-tile-visualizer', () => ({
+  FrameTileVisualizer: class {
+    addTile = vi.fn();
+    clear = vi.fn();
+    dispose = mockFrameTileVisualizerDispose;
+    getCount() {
+      return 0;
+    }
+    constructor(scene: unknown) {
+      mockFrameTileVisualizerCtor(scene);
+    }
+  },
+}));
+vi.mock('../visualization/wire-frame-tile-subscribers', () => ({
+  wireFrameTileSubscribers: vi.fn(() => mockUnsubscribeFrameTiles),
+}));
+
 import { startReplayMode } from './replay-mode.js';
-import { loadActionsFromZip } from 'gps-plus-slam-app-framework/storage/zip-reader';
+import { loadRecording } from '../storage/recording-loader';
 import { wireStoreSubscribers } from 'gps-plus-slam-app-framework/state/store-subscribers';
+import type { MapData } from 'gps-plus-slam-app-framework/visualization/map-data';
 import { createRecorderStore } from '../state/recorder-store';
 import {
   initReplayScene,
@@ -140,8 +173,20 @@ describe('replay-mode', () => {
   beforeEach(() => {
     vi.useFakeTimers();
     vi.clearAllMocks();
-    // Default: loadActionsFromZip returns our fixture
-    vi.mocked(loadActionsFromZip).mockResolvedValue(makeMockZipActions());
+    // Default: loadRecording returns our fixture wrapped in the LoadedRecording shape.
+    const fixtureEntries = makeMockZipActions();
+    vi.mocked(loadRecording).mockResolvedValue({
+      meta: null,
+      actions: fixtureEntries,
+      refPoints: [],
+      capabilities: {
+        hasSidecarRefPoints: false,
+        hasFusedObservations: false,
+        hasSessionMeta: false,
+        migrationApplied: false,
+      },
+      getFinalState: vi.fn(),
+    });
   });
 
   afterEach(() => {
@@ -155,8 +200,8 @@ describe('replay-mode', () => {
     const config = makeConfig();
     await startReplayMode(fakeZipData, config);
 
-    // loadActionsFromZip called with the zip data
-    expect(loadActionsFromZip).toHaveBeenCalledWith(fakeZipData);
+    // loadRecording called with the zip data
+    expect(loadRecording).toHaveBeenCalledWith(fakeZipData);
 
     // createRecorderStore called with NullStorageBackend
     expect(createRecorderStore).toHaveBeenCalledWith(
@@ -293,18 +338,16 @@ describe('replay-mode', () => {
     expect(mockOverlay.setGpsPosition).not.toHaveBeenCalled();
   });
 
-  it('setMapOverlay proxy forwards addFusedPoint, addAlignmentSnapshot, and addCurrentMarker', async () => {
-    // Why (Phase 1b): The map overlay proxy must forward all new overlay
-    // methods so the store subscriber can push fused path, alignment
-    // snapshots, and reference points to the Leaflet map in replay mode.
+  it('setMapOverlay proxy forwards render and addCurrentMarker', async () => {
+    // Why (Phase 3): The map overlay proxy must forward render (the unified
+    // MapData snapshot) and addCurrentMarker so the store subscriber can push
+    // the trajectory and reference points to the Leaflet map in replay mode.
     const config = makeConfig();
     const controller = await startReplayMode(fakeZipData, config);
 
     const mockOverlay = {
       setGpsPosition: vi.fn(),
-      addRawGpsPoint: vi.fn(),
-      addFusedPoint: vi.fn(),
-      addAlignmentSnapshot: vi.fn(),
+      render: vi.fn<(data: MapData) => void>(),
       addCurrentMarker: vi.fn(),
     };
     controller.setMapOverlay(mockOverlay);
@@ -314,11 +357,15 @@ describe('replay-mode', () => {
       addCurrentMarker: (lat: number, lon: number, name: string) => void;
     };
 
-    mapProxy.addFusedPoint!(50.1, 8.1);
-    expect(mockOverlay.addFusedPoint).toHaveBeenCalledWith(50.1, 8.1);
+    const sampleMapData: MapData = {
+      userPosition: { lat: 50.1, lng: 8.1 },
+      rawGpsPath: [{ lat: 50.1, lng: 8.1 }],
+      fusedPath: [],
+      alignmentSnapshots: [],
+    };
 
-    mapProxy.addAlignmentSnapshot!(50.2, 8.2);
-    expect(mockOverlay.addAlignmentSnapshot).toHaveBeenCalledWith(50.2, 8.2);
+    mapProxy.render!(sampleMapData);
+    expect(mockOverlay.render).toHaveBeenCalledWith(sampleMapData);
 
     mapProxy.addCurrentMarker(50.3, 8.3, 'bench');
     expect(mockOverlay.addCurrentMarker).toHaveBeenCalledWith(
@@ -386,6 +433,43 @@ describe('replay-mode', () => {
 
     // Replay scene should be disposed
     expect(disposeReplayScene).toHaveBeenCalledTimes(1);
+  });
+
+  // --- F3.5c: frame-tile visualizer wiring ---
+
+  it('wires frame-tile subscribers against the replay scene (F3.5c)', async () => {
+    // Why (F3.5): add2dImage actions from the recording must surface as
+    // textured planes in the replay scene. The wiring must use the scene
+    // returned by initReplayScene and the store the engine dispatches to.
+    const { wireFrameTileSubscribers } =
+      await import('../visualization/wire-frame-tile-subscribers');
+    const { createZipFrameBlobSource } =
+      await import('../storage/zip-frame-blob-source');
+
+    const config = makeConfig();
+    const controller = await startReplayMode(fakeZipData, config);
+
+    expect(createZipFrameBlobSource).toHaveBeenCalledWith(fakeZipData);
+    expect(mockFrameTileVisualizerCtor).toHaveBeenCalledWith(
+      expect.objectContaining({ name: 'mock-scene' })
+    );
+    expect(wireFrameTileSubscribers).toHaveBeenCalledTimes(1);
+    const opts = vi.mocked(wireFrameTileSubscribers).mock.calls[0][0];
+    expect(opts.storeRef.get()).toBe(controller.getStore());
+  });
+
+  it('dispose tears down frame-tile subscribers and visualizer (F3.5c)', async () => {
+    // Why: Without per-replay-session teardown the next replay would stack
+    // subscribers and leak GPU textures.
+    mockUnsubscribeFrameTiles.mockClear();
+    mockFrameTileVisualizerDispose.mockClear();
+
+    const config = makeConfig();
+    const controller = await startReplayMode(fakeZipData, config);
+    controller.dispose();
+
+    expect(mockUnsubscribeFrameTiles).toHaveBeenCalledTimes(1);
+    expect(mockFrameTileVisualizerDispose).toHaveBeenCalledTimes(1);
   });
 
   // --- Error handling (R7 wiring) ---

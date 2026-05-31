@@ -11,7 +11,13 @@
  *
  * Sentry Integration:
  * - All log levels add Sentry breadcrumbs for debugging context
- * - log.error() with Error objects automatically reports to Sentry
+ * - log.warn() reports a standalone Sentry Issue (captureMessage)
+ * - log.error() reports a standalone Sentry Issue: captureException for Error
+ *   arguments, or a captureMessage fallback for string-only errors
+ * - warn/error Issues are grouped by a normalized message template
+ *   (['log', level, tag, template]) so dynamic values (frame indices, sizes,
+ *   filenames) collapse into one Issue per message kind without merging
+ *   genuinely different messages that share a tag
  */
 
 import * as Sentry from '@sentry/browser';
@@ -272,24 +278,91 @@ function addSentryBreadcrumb(
 }
 
 /**
+ * Normalize a log message body into a stable "template" for Sentry grouping.
+ *
+ * Replaces the dynamic tokens that typically vary between otherwise-identical
+ * log lines (numbers, UUIDs, quoted strings) with placeholders. This makes the
+ * fingerprint depend on the *kind* of message rather than its concrete values,
+ * so that:
+ * - the same message with different dynamic values collapses into one Issue
+ *   (e.g. `frame 12` / `frame 87` -> `frame {n}`), and
+ * - two genuinely different messages under the same tag stay as separate
+ *   Issues (because their templates differ).
+ *
+ * Order matters: UUIDs are replaced before bare numbers, otherwise the number
+ * rule would shred the digit groups inside a UUID first.
+ */
+function toFingerprintTemplate(body: string): string {
+  return (
+    body
+      // UUIDs (e.g. 3f2504e0-4f89-11d3-9a0c-0305e82c3301)
+      .replace(
+        /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi,
+        '{uuid}'
+      )
+      // Numbers: optional sign, decimals, exponent (e.g. -3.5, 1e9, 100)
+      .replace(/-?\d+(?:\.\d+)?(?:e[+-]?\d+)?/gi, '{n}')
+      // Quoted strings (filenames, ids) — keep the quotes, blank the contents
+      .replace(/"[^"]*"/g, '"{str}"')
+      .replace(/'[^']*'/g, "'{str}'")
+  );
+}
+
+/**
+ * Capture a log line as a standalone Sentry Issue (message event).
+ *
+ * Shared by `reportWarningToSentry` and the string-only branch of
+ * `reportErrorsToSentry`. The fingerprint is
+ * `['log', level, tag, <normalized template>]` so that dynamic values in the
+ * message do not fragment one logical problem into many Issues, while distinct
+ * messages from the same tag remain distinct Issues (see
+ * {@link toFingerprintTemplate}).
+ */
+function captureLogMessage(
+  level: 'warning' | 'error',
+  tag: string,
+  args: unknown[]
+): void {
+  const body = args.map((arg) => serializeArg(arg)).join(' ');
+  const message = `[${tag}] ${body}`;
+  Sentry.captureMessage(message, {
+    level,
+    fingerprint: ['log', level, tag, toFingerprintTemplate(body)],
+  });
+}
+
+/**
  * Report a warning to Sentry as a standalone message.
  * Called for log.warn() so warnings are independently visible in the
  * Sentry dashboard, not only as breadcrumbs attached to later exceptions.
  */
 function reportWarningToSentry(tag: string, args: unknown[]): void {
-  const message = `[${tag}] ${args.map((arg) => serializeArg(arg)).join(' ')}`;
-  Sentry.captureMessage(message, 'warning');
+  captureLogMessage('warning', tag, args);
 }
 
 /**
- * Report Error objects to Sentry.
- * Only called for log.error() - other levels just add breadcrumbs.
+ * Report log.error() arguments to Sentry as standalone Issues.
+ *
+ * - For every argument that is an `Error`, calls `captureException` so the
+ *   Issue carries a full stack trace.
+ * - If NO argument is an `Error` (a string-only `log.error(...)`), falls back
+ *   to a message event so the error still surfaces as an Issue instead of only
+ *   a breadcrumb/Log.
+ *
+ * The fallback is mutually exclusive with `captureException` to avoid duplicate
+ * Issues when an Error is present, and groups via the same normalized template
+ * fingerprint as warnings (see {@link captureLogMessage}).
  */
-function reportErrorsToSentry(args: unknown[]): void {
+function reportErrorsToSentry(tag: string, args: unknown[]): void {
+  let capturedError = false;
   for (const arg of args) {
     if (arg instanceof Error) {
       Sentry.captureException(arg);
+      capturedError = true;
     }
+  }
+  if (!capturedError) {
+    captureLogMessage('error', tag, args);
   }
 }
 
@@ -330,8 +403,9 @@ export function createLogger(tag: string): Logger {
     error: (...args: unknown[]): void => {
       addToBuffer(LogLevel.ERROR, tag, args);
       addSentryBreadcrumb(LogLevel.ERROR, tag, args);
-      // Report Error objects to Sentry for visibility in dashboard
-      reportErrorsToSentry(args);
+      // Report Error objects to Sentry for visibility in dashboard.
+      // String-only errors fall back to captureMessage (see reportErrorsToSentry).
+      reportErrorsToSentry(tag, args);
       if (globalLogLevel <= LogLevel.ERROR) {
         console.error(prefix, ...args);
       }

@@ -32,7 +32,7 @@ import {
   stopOrientationWatch,
 } from './gps';
 import type { GpsPosition, RawDeviceOrientation } from './gps';
-import type { DeviceOrientation } from '../ar/tracking-state';
+import type { DeviceOrientation } from '../state/tracking-slice';
 import {
   createMockGeolocation,
   createMockGeoPosition,
@@ -160,7 +160,10 @@ describe('GPS Module', () => {
 
     /**
      * Why this test matters:
-     * startGpsWatch must call navigator.geolocation.watchPosition with correct options.
+     * startGpsWatch must call navigator.geolocation.watchPosition with the
+     * Android-tuned options documented in
+     * docs/2026-05-20-android-altitude-accuracy-audit.md (R1). These values
+     * are easy to silently regress, so we pin them here.
      */
     it('calls watchPosition with high accuracy options', () => {
       const onPosition = vi.fn();
@@ -171,8 +174,8 @@ describe('GPS Module', () => {
       const [, , options] = mockGeolocation.watchPosition.mock.calls[0];
       expect(options).toEqual({
         enableHighAccuracy: true,
-        maximumAge: 0,
-        timeout: 10000,
+        maximumAge: 5000,
+        timeout: 15000,
       });
     });
 
@@ -405,10 +408,10 @@ describe('GPS Module', () => {
   describe('RawDeviceOrientation vs DeviceOrientation', () => {
     /**
      * Why this test matters:
-     * Two types previously shared the same name "DeviceOrientation" causing
-     * import confusion. RawDeviceOrientation (gps.ts) has nullable fields
-     * matching the browser's DeviceOrientationEvent API, while DeviceOrientation
-     * (tracking-state.ts) has resolved non-nullable values for AR math.
+     * Two types share the name "DeviceOrientation" but live in different
+     * modules. RawDeviceOrientation (gps.ts) has nullable fields matching
+     * the browser's DeviceOrientationEvent API, while DeviceOrientation
+     * (state/tracking-slice.ts) has resolved non-nullable values for AR math.
      * This test guards against accidental re-merging of the two types.
      */
     it('RawDeviceOrientation has nullable fields and absolute flag', () => {
@@ -423,7 +426,7 @@ describe('GPS Module', () => {
       expect(raw).toHaveProperty('absolute');
     });
 
-    it('DeviceOrientation (tracking-state) requires non-null numbers', () => {
+    it('DeviceOrientation (tracking-slice) requires non-null numbers', () => {
       const resolved: DeviceOrientation = {
         alpha: 180,
         beta: 45,

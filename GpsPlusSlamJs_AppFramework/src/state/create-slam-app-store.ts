@@ -28,13 +28,39 @@ import {
   arElementsReducer,
   sanitizeForDevTools,
   validateLicenseKey,
+  setZeroPos,
   type RootState as LibraryRootState,
 } from 'gps-plus-slam-js';
 import { COMMUNITY_LICENSE_KEY } from 'gps-plus-slam-js/community-license-key';
 import type { StorageBackend } from '../storage/storage-backend';
 import type { SessionMetadata as OpfsSessionMetadata } from '../storage/opfs-storage';
-import { recordingReducer, type RecordingState } from './recording-slice';
-import { createPersistenceMiddleware } from './persistence-middleware';
+import {
+  recordingReducer,
+  recordWriteFailure,
+  type RecordingState,
+} from './recording-slice';
+import { trackingReducer, type TrackingSliceState } from './tracking-slice';
+import {
+  trackingQualityReducer,
+  createTrackingQualityListenerMiddleware,
+  type TrackingQualitySliceState,
+  type TrackingQualityOptions,
+} from './tracking-quality';
+import {
+  createPersistenceMiddleware,
+  slicePrefixOf,
+} from './persistence-middleware';
+
+/**
+ * Slice prefixes the framework always persists, derived from the actual
+ * library / framework action creators (never hand-typed). A rename of the
+ * `gpsData` or `recording` slice therefore propagates here automatically
+ * instead of silently dropping that slice's actions from recordings.
+ */
+const BUILTIN_PERSISTED_PREFIXES: readonly string[] = [
+  slicePrefixOf(setZeroPos.type), // library `gpsData` slice
+  slicePrefixOf(recordWriteFailure.type), // framework `recording` slice
+];
 
 /**
  * Base shape produced by `createSlamAppStore` with no `extraReducers`.
@@ -44,6 +70,8 @@ import { createPersistenceMiddleware } from './persistence-middleware';
  */
 export interface SlamAppRootState extends LibraryRootState {
   recording: RecordingState;
+  tracking: TrackingSliceState;
+  trackingQuality: TrackingQualitySliceState;
 }
 
 /** A bare-minimum middleware signature compatible with RTK's middleware list. */
@@ -76,6 +104,15 @@ export interface SlamAppStoreOptions<
   extraMiddleware?: ReadonlyArray<SlamAppMiddleware>;
 
   /**
+   * Additional slice prefixes to persist beyond the framework built-ins
+   * (`gpsData`, `recording`). Pass caller-owned slice names derived from
+   * the slice itself — e.g. `slicePrefixOf(addRefPointEntry.type)` or
+   * `refPointsSlice.name` — never a hand-typed literal, so a rename can
+   * never silently drop the slice's actions from recordings.
+   */
+  persistedExtraPrefixes?: readonly string[];
+
+  /**
    * Invoked when the persistence middleware fails to durably write an action.
    */
   onWriteFailure?: (error: Error) => void;
@@ -94,6 +131,14 @@ export interface SlamAppStoreOptions<
    * @see EULA.md §3 — License Key
    */
   licenseKey?: string;
+
+  /**
+   * Optional overrides for the tracking-quality reporter
+   * (matrix-history size, residual window, thresholds, etc.).
+   *
+   * @see docs/2026-05-16-tracking-quality-metrics-plan.md
+   */
+  trackingQualityOptions?: Partial<TrackingQualityOptions>;
 }
 
 /**
@@ -139,9 +184,11 @@ export function createSlamAppStore<
     storageBackend,
     extraReducers,
     extraMiddleware,
+    persistedExtraPrefixes,
     onWriteFailure,
     enableDevChecks = true,
     licenseKey = COMMUNITY_LICENSE_KEY,
+    trackingQualityOptions,
   } = options;
 
   validateLicenseKey(licenseKey);
@@ -151,8 +198,14 @@ export function createSlamAppStore<
     gpsElements: gpsElementsReducer,
     arElements: arElementsReducer,
     recording: recordingReducer,
+    tracking: trackingReducer,
+    trackingQuality: trackingQualityReducer,
     ...(extraReducers ?? ({} as ExtraReducers)),
   };
+
+  const trackingQualityMiddleware = createTrackingQualityListenerMiddleware(
+    trackingQualityOptions
+  );
 
   const store = configureStore({
     reducer,
@@ -160,10 +213,19 @@ export function createSlamAppStore<
       getDefaultMiddleware({
         serializableCheck: enableDevChecks,
         immutableCheck: enableDevChecks,
-      }).concat(
-        createPersistenceMiddleware({ storageBackend, onWriteFailure }),
-        ...(extraMiddleware ?? [])
-      ),
+      })
+        .prepend(trackingQualityMiddleware)
+        .concat(
+          createPersistenceMiddleware({
+            storageBackend,
+            onWriteFailure,
+            persistedPrefixes: [
+              ...BUILTIN_PERSISTED_PREFIXES,
+              ...(persistedExtraPrefixes ?? []),
+            ],
+          }),
+          ...(extraMiddleware ?? [])
+        ),
     devTools: {
       actionSanitizer: sanitizeForDevTools,
       stateSanitizer: sanitizeForDevTools,

@@ -13,6 +13,7 @@
 
 import type { RefPointPickerResult } from './ui/ref-point-picker';
 import type { PermissionCheckResult } from 'gps-plus-slam-app-framework/sensors/permission-checker';
+import type { TrackingQualityReport } from 'gps-plus-slam-app-framework';
 import type { SessionSummaryData } from './ui/session-summary';
 
 declare global {
@@ -48,6 +49,28 @@ declare global {
       getGpsEventVisualizerCounts: () => { raw: number; fused: number };
       setGpsEventVisualizerZeroRef: (lat: number, lng: number) => void;
       clearGpsEventVisualizer: () => void;
+      /**
+       * §3c — Replay-mode diagnostic. Adds a GPS event with optional 1σ
+       * accuracy to the visualizer. Creates an offline scene + arWorldGroup
+       * via `setSceneForTesting` so the visualizer can run without an
+       * active WebXR session.
+       */
+      addGpsEventForTest: (
+        gpsCoords: [number, number, number],
+        odomPosition: [number, number, number],
+        accuracy?: { horizontal?: number; vertical?: number }
+      ) => void;
+      /**
+       * §3c — Reads back the world-space bounding-box size of each raw-GPS
+       * marker via `THREE.Box3.setFromObject` in insertion order.
+       */
+      getRawGpsMarkerWorldSizes: () => Array<{
+        x: number;
+        y: number;
+        z: number;
+      }>;
+      // Tracking quality indicator hook
+      updateTrackingQuality: (report: TrackingQualityReport) => void;
       // Mandatory storage selection hooks (Task 1a-fix)
       setFolderSelected: (selected: boolean) => void;
       setSaveLocationSelected: (selected: boolean) => void;

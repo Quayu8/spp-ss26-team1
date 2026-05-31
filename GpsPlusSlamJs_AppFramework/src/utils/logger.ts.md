@@ -89,9 +89,18 @@ unsubscribe();
 
 5. **Thread safety:** Not applicable (single-threaded JS), but care is taken to avoid mutation of returned buffer copies.
 
-6. **Sentry integration:** All log levels add Sentry breadcrumbs for debugging context. When an exception is later captured, Sentry will show the trail of log messages leading up to it. Additionally:
-   - `log.warn()` calls `Sentry.captureMessage(message, 'warning')` so warnings appear as standalone issues in the Sentry dashboard.
-   - `log.error()` with Error objects automatically calls `Sentry.captureException()` to report the error to Sentry.
+6. **Sentry integration:** All log levels add Sentry breadcrumbs for debugging context. When an exception is later captured, Sentry will show the trail of log messages leading up to it. Additionally, both `warn` and `error` produce standalone Sentry **Issues** (so the Issues dashboard is the single place to watch anything logged at warn/error level):
+   - `log.warn()` calls `Sentry.captureMessage(message, { level: 'warning', fingerprint: [...] })`.
+   - `log.error()` with one or more `Error` arguments calls `Sentry.captureException()` for each `Error` (full stack trace).
+   - `log.error()` with **no** `Error` argument (string-only) falls back to `Sentry.captureMessage(message, { level: 'error', fingerprint: [...] })`. The fallback is mutually exclusive with `captureException`, so an error carrying an `Error` never also produces a message Issue.
+   - **Template-based fingerprint grouping:** the fingerprint is `['log', level, tag, template]`, where `template` is the message with its dynamic tokens normalized. This collapses dynamic values into a single Issue **per message kind**, while two genuinely different messages that share a `tag` stay as separate Issues. The `tag` identifies the source module, not the kind of message, so it is intentionally _not_ the sole grouping key. `debug`/`info` remain breadcrumb-only.
+     - **Normalized (replaced with placeholders) by `toFingerprintTemplate`:**
+       - UUIDs → `{uuid}` (matched first, before numbers, so digit groups inside a UUID are not shredded).
+       - Numbers → `{n}`: signed, decimal, and exponent forms (`-3.5`, `1e3`, `100`). Because numbers run before the quoted-string rule, a quoted path with an embedded index (`"actions/000001.json"`) collapses entirely to `"{str}"`. ISO timestamps fold into a stable (if lossy) numeric template via this rule — no dedicated date rule exists.
+       - Quoted strings → `"{str}"` / `'{str}'` (both quote styles).
+     - **Deliberately NOT normalized** (verified against real call sites — over-normalizing these would merge distinct problems, which is worse than mild fragmentation):
+       - Free-form appended `error.message` text — it carries the actual diagnosis and must keep distinct errors as distinct Issues.
+       - Bare (unquoted, non-UUID) identifiers/paths such as `${pointId}`, `${name}`, `${entry.fullPath}` — a rule broad enough to catch these would also swallow ordinary English words (e.g. hex-only words). Wrap such values in quotes at the call site if you want them grouped.
 
 ## Examples
 
@@ -131,9 +140,22 @@ Unit tests in [logger.test.ts](logger.test.ts) cover:
 - Graceful handling of null, undefined, BigInt, Symbol, and functions
 - **Sentry integration:**
   - Breadcrumbs added for all log levels (debug, info, warn, error)
-  - `captureMessage` called with `'warning'` level for `log.warn()`
-  - `captureMessage` NOT called for debug/info/error logs
+  - `captureMessage` called with `'warning'` level and a `['log', 'warning', tag, template]` fingerprint for `log.warn()`
+  - Warnings of the same kind (same normalized template) share a fingerprint despite dynamic message content (grouped into one Issue)
+  - Genuinely different warnings that share a tag get different fingerprints (kept as separate Issues)
   - `captureException` called for Error objects in `log.error()`
   - Multiple Error objects in single `log.error()` call all reported
+  - String-only `log.error()` falls back to `captureMessage` with `'error'` level and a `['log', 'error', tag, template]` fingerprint
+  - Numbers and UUIDs in messages are normalized so otherwise-identical lines group together
+  - `captureMessage` is NOT called when an `Error` is present in `log.error()` (no duplicate Issue)
+  - `captureMessage` NOT called for debug/info logs
   - Non-Error arguments don't trigger `captureException`
   - `log.debug/info/warn` with Error objects don't trigger `captureException`
+- **Fingerprint template normalization** (`toFingerprintTemplate`, derived from a review of real call sites):
+  - Signed / decimal / exponent numbers all normalize to `{n}`
+  - ISO 8601 timestamps group via the number rule (stable, if lossy, template)
+  - A double-quoted path with an embedded number fully collapses to `"{str}"` (number rule runs before the quote rule)
+  - Single-quoted strings normalize the same as double-quoted
+  - A message mixing several token kinds (numbers + quoted filename) groups across differing concrete values
+  - Free-form `error.message` text is NOT normalized (distinct errors stay distinct — deliberate boundary)
+  - Bare unquoted non-UUID identifiers are NOT normalized (deliberate boundary)

@@ -20,6 +20,7 @@ import { startSession, endSession } from '../state/recorder-store';
 import type { RecorderStore } from '../state/recorder-store';
 import { wireStoreSubscribers } from 'gps-plus-slam-app-framework/state/store-subscribers';
 import { wireRefPointSubscribers } from '../state/ref-point-subscribers';
+import { selectRefPointEntries } from '../state/ref-points-slice';
 import type { RecordingOptions } from 'gps-plus-slam-app-framework/state/recording-options';
 import { formatTimestamp } from 'gps-plus-slam-app-framework/storage/file-system-utils';
 import {
@@ -68,6 +69,7 @@ import {
   showError,
   updateStatus,
   hideFrameCount,
+  hideTrackingQuality,
   updateSyncStatus,
 } from '../ui/hud';
 import {
@@ -88,6 +90,7 @@ import { createLogger } from 'gps-plus-slam-app-framework/utils/logger';
 import type { LatLong, Matrix4 } from 'gps-plus-slam-app-framework/core';
 import { calcGpsCoords } from 'gps-plus-slam-app-framework/core';
 import type { LeafletMapOverlay } from 'gps-plus-slam-app-framework/visualization/leaflet-map-overlay';
+import type { MapData } from 'gps-plus-slam-app-framework/visualization/map-data';
 import { getBuildInfo } from '../utils/build-info';
 import { DEFAULT_SCENARIO } from '../ui/session-browser';
 
@@ -137,14 +140,21 @@ export interface RecordingSessionDeps {
   getStore: () => RecorderStore;
   /** Replace the module-level store in main.ts. */
   setStore: (store: RecorderStore) => void;
+  /**
+   * Re-point the WebXR session at the new store so live AR frames keep
+   * dispatching `poseReceived` into the store that drives the current
+   * recording. Without this, the new store's `tracking.phase` stays at
+   * `'initializing'` and the tracking-quality phase gate keeps the HUD
+   * pinned to "AR LOST" for the entire recording (Finding #1,
+   * 2026-05-23 user feedback).
+   */
+  setTrackingStore: (store: RecorderStore) => void;
   /** Create a fresh store instance. */
   createNewStore: () => RecorderStore;
   /** Read the current recording options (owned by main.ts). */
   getRecordingOptions: () => RecordingOptions;
   /** Access the map overlay (may be null if AR not started). */
   getMapOverlay: () => LeafletMapOverlay | null;
-  /** Clear ref-point usage tracking for new session. */
-  clearRefPointUsage: () => void;
   /** Read session notes from UI. */
   getSessionNotes: () => string;
   /** Wait for GPS zero reference (polling store, owned by main.ts). */
@@ -255,7 +265,6 @@ export function createRecordingSessionHandlers(
     log.info('Start recording');
 
     resetCoordinatorState();
-    deps.clearRefPointUsage();
     gpsEventVisualizer.clearAll();
 
     // Cleanup previous store subscription if any
@@ -274,6 +283,12 @@ export function createRecordingSessionHandlers(
     // Create new store for this session
     const store = deps.createNewStore();
     deps.setStore(store);
+    // Finding #1 (2026-05-23 user feedback): the WebXR session captured a
+    // reference to the PREVIOUS store at app boot. If we do not re-point it
+    // now, every `poseReceived` dispatch flows into the orphaned store and
+    // the new store's `tracking.phase` never leaves `'initializing'`, which
+    // pins the tracking-quality HUD to "AR LOST" for the whole recording.
+    deps.setTrackingStore(store);
 
     // Generate session name from timestamp
     const now = new Date();
@@ -295,14 +310,8 @@ export function createRecordingSessionHandlers(
       setGpsPosition(lat: number, lon: number): void {
         deps.getMapOverlay()?.setGpsPosition(lat, lon);
       },
-      addRawGpsPoint(lat: number, lon: number): void {
-        deps.getMapOverlay()?.addRawGpsPoint(lat, lon);
-      },
-      addFusedPoint(lat: number, lon: number): void {
-        deps.getMapOverlay()?.addFusedPoint(lat, lon);
-      },
-      addAlignmentSnapshot(lat: number, lon: number): void {
-        deps.getMapOverlay()?.addAlignmentSnapshot(lat, lon);
+      render(data: MapData): void {
+        deps.getMapOverlay()?.render(data);
       },
       addCurrentMarker(lat: number, lon: number, name: string): void {
         deps.getMapOverlay()?.addCurrentMarker(lat, lon, name);
@@ -434,6 +443,7 @@ export function createRecordingSessionHandlers(
 
     stopImageCapture();
     hideFrameCount();
+    hideTrackingQuality();
     stopDepthCapture();
     stopGpsWatch();
     stopOrientationWatch();
@@ -448,7 +458,12 @@ export function createRecordingSessionHandlers(
     const state = store.getState();
     const sessionMetadata = state.recording.sessionMetadata;
     const gpsEvents = state.gpsData?.gpsEvents;
-    const refPoints = state.gpsData?.referencePoints ?? [];
+    // Reference points come from the recorder's flat `refPoints` slice (the
+    // canonical post-slice-collapse source). The legacy `gpsData.referencePoints`
+    // slice is no longer dispatched to (Step 5.7a-1), so reading it here would
+    // always yield an empty list. The flat entries carry `timestamp`, which the
+    // summary map needs to classify each marker as prior vs. current.
+    const refPoints = selectRefPointEntries(state.refPoints);
     const gpsPositions = gpsEvents?.gpsPositions ?? [];
 
     if (!sessionMetadata?.startTime) {
@@ -609,6 +624,9 @@ export function createRecordingSessionHandlers(
       rawGpsPath: gpsPositions.map((p) => ({
         lat: p.latitude,
         lng: p.longitude,
+        ...(typeof p.latLongAccuracy === 'number' && p.latLongAccuracy > 0
+          ? { accuracy: p.latLongAccuracy }
+          : {}),
       })),
       fusedPath: computeFusedPath({
         odometryPositions: odomPositions,
@@ -616,9 +634,10 @@ export function createRecordingSessionHandlers(
         zeroRef: firstGps?.zeroRef ?? null,
       }),
       referencePointsForMap: refPoints.map((rp) => ({
-        lat: rp.gpsPoint.latitude,
-        lng: rp.gpsPoint.longitude,
-        name: rp.id,
+        lat: rp.gpsPoint?.latitude ?? rp.rawGpsPoint.latitude,
+        lng: rp.gpsPoint?.longitude ?? rp.rawGpsPoint.longitude,
+        name: rp.name ?? rp.id,
+        timestamp: rp.timestamp,
       })),
       zipSizeBytes: lastSyncResult?.blob?.size,
       zipFileCount: lastSyncResult?.fileCount,

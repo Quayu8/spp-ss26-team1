@@ -25,8 +25,12 @@ import {
   updateSaveStatus,
   updateRefPointButtonLabel,
   setNewRefPointButtonVisible,
+  updatePermissionStatus,
+  updateTrackingQuality,
+  hideTrackingQuality,
   type UICallbacks,
 } from './hud.js';
+import type { PermissionCheckResult } from 'gps-plus-slam-app-framework/sensors/permission-checker';
 
 /**
  * Creates a minimal DOM structure for testing.
@@ -50,6 +54,17 @@ function setupMinimalDOM(): void {
     <div id="gps-info" class="hidden"><span id="gps-accuracy"></span></div>
     <div id="ar-info" class="hidden"><span id="ar-tracking"></span></div>
     <div id="frame-count-info" class="hidden"><span id="frame-count">0</span></div>
+    <div id="tracking-quality" class="hidden">
+      <div id="tracking-quality-badge"><span id="tq-state"></span> <span id="tq-confidence"></span></div>
+      <div id="tracking-quality-details" class="hidden">
+        <div id="tq-convergence"></div>
+        <div id="tq-sum-rot"></div>
+        <div id="tq-sum-pos"></div>
+        <div id="tq-residual"></div>
+        <div id="tq-gps-accuracy"></div>
+        <div id="tq-coverage"></div>
+      </div>
+    </div>
     <textarea id="session-notes" disabled></textarea>
     <div id="recording-indicator" class="hidden"></div>
     <p id="enter-ar-hint"></p>
@@ -2206,5 +2221,514 @@ describe('setNewRefPointButtonVisible', () => {
     const btn = document.getElementById('btn-new-ref-point')!;
     btn.click();
     expect(cbs.onMarkNewRefPoint).toHaveBeenCalledOnce();
+  });
+});
+
+/**
+ * Tests for updatePermissionStatus — the "Grant Permissions" button must
+ * stay visible (and show explanatory red text) until every mandatory
+ * permission reports granted === true, including when a permission is
+ * denied. See docs/2026-05-03-setup-screen-defaults-and-permission-rerequest.md
+ * (Issue 2) for the full design.
+ */
+describe('updatePermissionStatus — Grant Permissions button visibility', () => {
+  function setupPermissionDOM(): void {
+    document.body.innerHTML = `
+      <button id="btn-enter-ar" disabled></button>
+      <select id="scenario-select"></select>
+      <button id="btn-start"></button>
+      <button id="btn-stop" class="hidden"></button>
+      <button id="btn-ref-point" class="hidden"></button>
+      <button id="btn-new-ref-point" class="hidden"></button>
+      <button id="btn-map"></button>
+      <button id="btn-open-folder"></button>
+      <button id="btn-choose-save"></button>
+      <div id="setup-modal"></div>
+      <div id="new-scenario-section" class="hidden"></div>
+      <input id="new-scenario-name" type="text" />
+      <span id="status-text"></span>
+      <div id="gps-info" class="hidden"><span id="gps-accuracy"></span></div>
+      <div id="ar-info" class="hidden"><span id="ar-tracking"></span></div>
+      <div id="frame-count-info" class="hidden"><span id="frame-count">0</span></div>
+      <textarea id="session-notes" disabled></textarea>
+      <div id="recording-indicator" class="hidden"></div>
+      <p id="enter-ar-hint"></p>
+      <span id="perm-filestorage-status"></span>
+      <span id="perm-webxr-status"></span>
+      <span id="perm-gps-status"></span>
+      <span id="perm-camera-status"></span>
+      <span id="perm-orientation-status"></span>
+      <button id="btn-request-permissions" class="hidden">Grant Permissions</button>
+      <p id="permission-error" class="hidden"></p>
+    `;
+  }
+
+  function makeResult(
+    overrides: Partial<{
+      webxr: boolean | null;
+      geolocation: boolean | null;
+      camera: boolean | null;
+      orientation: boolean | null;
+    }> = {}
+  ): PermissionCheckResult {
+    // Use `in` checks so explicit `null` overrides aren't coerced by `??`.
+    const xr = 'webxr' in overrides ? overrides.webxr! : true;
+    const geo = 'geolocation' in overrides ? overrides.geolocation! : true;
+    const cam = 'camera' in overrides ? overrides.camera! : true;
+    const ori = 'orientation' in overrides ? overrides.orientation! : true;
+    return {
+      webxr: {
+        supported: true,
+        granted: xr,
+        error: xr === false ? 'AR access denied.' : undefined,
+      },
+      geolocation: {
+        supported: true,
+        granted: geo,
+        error: geo === false ? 'Location access denied.' : undefined,
+      },
+      camera: {
+        supported: true,
+        granted: cam,
+        error: cam === false ? 'Camera access denied.' : undefined,
+      },
+      orientation: { supported: true, granted: ori },
+      fileSystem: { supported: true, granted: true },
+      // Mirrors allMandatoryReady in permission-checker.ts: WebXR + Location +
+      // Camera (+ FileSystem, always true here). Compass is excluded.
+      allMandatoryReady: xr === true && geo === true && cam === true,
+    };
+  }
+
+  // Why: When a permission flips to denied, the user must still have an
+  // in-app way to re-trigger the request after flipping the setting back in
+  // the browser. The old logic (granted === null) hid the button on denial.
+  it('keeps button visible when geolocation is denied (granted === false)', () => {
+    setupPermissionDOM();
+    initUI(createMockCallbacks());
+
+    updatePermissionStatus(makeResult({ geolocation: false }));
+
+    const btn = document.getElementById('btn-request-permissions')!;
+    expect(btn.classList.contains('hidden')).toBe(false);
+  });
+
+  // Why: Same rule applied symmetrically — camera-denied must not hide the
+  // button either, otherwise the user gets stuck in a dead-end.
+  it('keeps button visible when camera is denied', () => {
+    setupPermissionDOM();
+    initUI(createMockCallbacks());
+
+    updatePermissionStatus(makeResult({ camera: false }));
+
+    const btn = document.getElementById('btn-request-permissions')!;
+    expect(btn.classList.contains('hidden')).toBe(false);
+  });
+
+  // Why: When everything is granted the button has nothing to do and must
+  // disappear — the original visibility contract for the happy path.
+  it('hides button once all mandatory permissions are granted', () => {
+    setupPermissionDOM();
+    initUI(createMockCallbacks());
+
+    updatePermissionStatus(makeResult());
+
+    const btn = document.getElementById('btn-request-permissions')!;
+    expect(btn.classList.contains('hidden')).toBe(true);
+  });
+
+  // Why: The button must also be visible in the initial "never asked"
+  // (granted === null) state — this regression-proofs the existing behavior
+  // while broadening the rule.
+  it('keeps button visible when permissions are still pending (null)', () => {
+    setupPermissionDOM();
+    initUI(createMockCallbacks());
+
+    updatePermissionStatus(makeResult({ geolocation: null }));
+
+    const btn = document.getElementById('btn-request-permissions')!;
+    expect(btn.classList.contains('hidden')).toBe(false);
+  });
+
+  // Why: When the button is visible because permissions are still pending
+  // (not yet denied), the user should see an explanatory red message that
+  // permissions are mandatory — per the design decision to keep the button
+  // label generic and surface the reason in #permission-error instead.
+  it('shows mandatory-permissions red text while permissions are pending', () => {
+    setupPermissionDOM();
+    initUI(createMockCallbacks());
+
+    updatePermissionStatus(makeResult({ geolocation: null, camera: null }));
+
+    const err = document.getElementById('permission-error')!;
+    expect(err.classList.contains('hidden')).toBe(false);
+    expect(err.textContent).toMatch(/mandatory/i);
+    expect(err.textContent).toMatch(/Location/);
+    expect(err.textContent).toMatch(/Camera/);
+  });
+
+  // Why: When a permission is explicitly denied, the existing specific
+  // "access denied" message must take precedence over the generic mandatory
+  // hint so the user gets actionable guidance.
+  it('shows specific denied message (not mandatory hint) when denied', () => {
+    setupPermissionDOM();
+    initUI(createMockCallbacks());
+
+    updatePermissionStatus(makeResult({ geolocation: false }));
+
+    const err = document.getElementById('permission-error')!;
+    expect(err.classList.contains('hidden')).toBe(false);
+    expect(err.textContent).toMatch(/access denied/i);
+    expect(err.textContent).not.toMatch(/mandatory/i);
+  });
+
+  // Why: Once everything is granted there is no error to show — the line
+  // must collapse so the setup modal looks clean.
+  it('hides permission-error when everything is granted', () => {
+    setupPermissionDOM();
+    initUI(createMockCallbacks());
+
+    updatePermissionStatus(makeResult());
+
+    const err = document.getElementById('permission-error')!;
+    expect(err.classList.contains('hidden')).toBe(true);
+  });
+
+  // Why: WebXR is mandatory (part of allMandatoryReady in
+  // permission-checker.ts) and requestAllPermissions probes it. If the user
+  // denies the AR/depth probe, the button MUST stay visible so they can
+  // retry — the old logic omitted WebXR entirely and hid the button,
+  // dead-ending the user with an error and no recovery path.
+  it('keeps button visible when WebXR is denied', () => {
+    setupPermissionDOM();
+    initUI(createMockCallbacks());
+
+    updatePermissionStatus(makeResult({ webxr: false }));
+
+    const btn = document.getElementById('btn-request-permissions')!;
+    expect(btn.classList.contains('hidden')).toBe(false);
+  });
+
+  // Why: When WebXR is explicitly denied (granted === false) the user gets
+  // the actionable "access denied. Please enable in browser settings."
+  // message — not the vague generic "mandatory" hint. WebXR denial is a real
+  // state (requestWebXRWithDepthPermission returns granted:false on a
+  // NotAllowedError), so AR must be in the consolidated denied list.
+  it('shows specific AR-denied message (not mandatory hint) when WebXR is denied', () => {
+    setupPermissionDOM();
+    initUI(createMockCallbacks());
+
+    updatePermissionStatus(makeResult({ webxr: false }));
+
+    const err = document.getElementById('permission-error')!;
+    expect(err.classList.contains('hidden')).toBe(false);
+    expect(err.textContent).toMatch(/AR/);
+    expect(err.textContent).toMatch(/access denied/i);
+    expect(err.textContent).not.toMatch(/mandatory/i);
+  });
+
+  // Why: While WebXR is still pending (granted === null) the mandatory hint
+  // must list AR so the user understands the AR permission is required.
+  it('lists AR in the mandatory hint while WebXR is pending', () => {
+    setupPermissionDOM();
+    initUI(createMockCallbacks());
+
+    updatePermissionStatus(makeResult({ webxr: null }));
+
+    const err = document.getElementById('permission-error')!;
+    expect(err.classList.contains('hidden')).toBe(false);
+    expect(err.textContent).toMatch(/mandatory/i);
+    expect(err.textContent).toMatch(/AR/);
+  });
+
+  // Why: Compass/orientation is NOT mandatory (excluded from
+  // allMandatoryReady). When it is the only missing permission the button
+  // must still show (the button requests it too), but the message must NOT
+  // claim Compass access is "mandatory" — that was the incorrect messaging.
+  it('keeps button visible for missing Compass without a mandatory error', () => {
+    setupPermissionDOM();
+    initUI(createMockCallbacks());
+
+    updatePermissionStatus(makeResult({ orientation: null }));
+
+    const btn = document.getElementById('btn-request-permissions')!;
+    expect(btn.classList.contains('hidden')).toBe(false);
+
+    const err = document.getElementById('permission-error')!;
+    // No mandatory permission is missing, so the mandatory hint must stay
+    // hidden and Compass must never be described as mandatory.
+    expect(err.textContent ?? '').not.toMatch(/mandatory/i);
+    expect(err.textContent ?? '').not.toMatch(/Compass/);
+  });
+
+  // Why: The mandatory hint must never include Compass even when other
+  // mandatory permissions are also pending — Compass is recommended-only.
+  it('excludes Compass from the mandatory hint when several are pending', () => {
+    setupPermissionDOM();
+    initUI(createMockCallbacks());
+
+    updatePermissionStatus(
+      makeResult({ geolocation: null, camera: null, orientation: null })
+    );
+
+    const err = document.getElementById('permission-error')!;
+    expect(err.classList.contains('hidden')).toBe(false);
+    expect(err.textContent).toMatch(/mandatory/i);
+    expect(err.textContent).toMatch(/Location/);
+    expect(err.textContent).toMatch(/Camera/);
+    expect(err.textContent).not.toMatch(/Compass/);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Tracking Quality indicator
+// ---------------------------------------------------------------------------
+
+import type { TrackingQualityReport } from 'gps-plus-slam-app-framework';
+
+function makeReport(
+  overrides: Partial<TrackingQualityReport> = {}
+): TrackingQualityReport {
+  return {
+    state: 'ok',
+    confidence: 0.85,
+    subScores: {
+      convergence: 0.9,
+      residualConsensus: 0.85,
+      compassAgreement: 0.95,
+      gpsAccuracy: 0.88,
+      coverage: 1.0,
+    },
+    diagnostics: {
+      recentSumRotationDeltaDeg: 1.2,
+      recentSumTranslationDeltaM: 0.5,
+      medianResidualM: 2.3,
+      medianRecentGpsAccuracyM: 6.0,
+      walkedDistanceM: 42,
+      directionSpreadDeg: 120,
+      headingDeltaDeg: 5.0,
+      compassDriftDetected: false,
+      observationsSeen: 25,
+      gpsVsFusedMaxDivergenceM: 3.1,
+    },
+    ...overrides,
+  };
+}
+
+describe('updateTrackingQuality', () => {
+  beforeEach(() => {
+    setupMinimalDOM();
+    initUI(createMockCallbacks());
+  });
+
+  // Why: the indicator must become visible once tracking quality data arrives.
+  it('unhides the tracking quality container', () => {
+    updateTrackingQuality(makeReport());
+
+    const container = document.getElementById('tracking-quality')!;
+    expect(container.classList.contains('hidden')).toBe(false);
+  });
+
+  // Why: the state badge is the primary at-a-glance signal for the user.
+  it('displays the state label', () => {
+    updateTrackingQuality(makeReport({ state: 'ok' }));
+    expect(document.getElementById('tq-state')!.textContent).toBe('OK');
+  });
+
+  // Why: numeric confidence gives users a sense of progression (0→1).
+  it('displays confidence as a percentage', () => {
+    updateTrackingQuality(makeReport({ confidence: 0.73 }));
+    expect(document.getElementById('tq-confidence')!.textContent).toBe('73%');
+  });
+
+  // Why: color coding must match tracking state for instant recognition.
+  it('applies green color for ok state', () => {
+    updateTrackingQuality(makeReport({ state: 'ok' }));
+    const badge = document.getElementById('tracking-quality-badge')!;
+    expect(badge.className).toContain('text-green-400');
+  });
+
+  it('applies yellow color for degraded state', () => {
+    updateTrackingQuality(makeReport({ state: 'degraded' }));
+    const badge = document.getElementById('tracking-quality-badge')!;
+    expect(badge.className).toContain('text-yellow-400');
+  });
+
+  it('applies gray color for warming-up state', () => {
+    updateTrackingQuality(makeReport({ state: 'warming-up' }));
+    const badge = document.getElementById('tracking-quality-badge')!;
+    expect(badge.className).toContain('text-gray-400');
+  });
+
+  it('applies red color for ar-lost state', () => {
+    updateTrackingQuality(makeReport({ state: 'ar-lost' }));
+    const badge = document.getElementById('tracking-quality-badge')!;
+    expect(badge.className).toContain('text-red-400');
+  });
+
+  // Why: the badge must toggle only its state-color class, not overwrite
+  // className wholesale. A wholesale overwrite would silently drop any
+  // layout/padding/font classes (and the static `cursor-pointer`) declared
+  // on the element in index.html. This guards against regressing to
+  // `badge.className = ...`.
+  it('preserves unrelated classes when updating state color', () => {
+    const badge = document.getElementById('tracking-quality-badge')!;
+    // Simulate classes that index.html may add now or in the future.
+    badge.classList.add('cursor-pointer', 'px-2', 'font-bold');
+
+    updateTrackingQuality(makeReport({ state: 'ok' }));
+
+    expect(badge.classList.contains('cursor-pointer')).toBe(true);
+    expect(badge.classList.contains('px-2')).toBe(true);
+    expect(badge.classList.contains('font-bold')).toBe(true);
+    expect(badge.classList.contains('text-green-400')).toBe(true);
+  });
+
+  // Why: switching state must remove the previous state color, otherwise
+  // stale color classes accumulate and the displayed color is undefined.
+  it('removes the previous state color when state changes', () => {
+    const badge = document.getElementById('tracking-quality-badge')!;
+
+    updateTrackingQuality(makeReport({ state: 'ok' }));
+    expect(badge.classList.contains('text-green-400')).toBe(true);
+
+    updateTrackingQuality(makeReport({ state: 'ar-lost' }));
+    expect(badge.classList.contains('text-green-400')).toBe(false);
+    expect(badge.classList.contains('text-red-400')).toBe(true);
+  });
+
+  // Why: sub-scores must be visible in the expanded detail view.
+  it('populates sub-score values in detail panel', () => {
+    // Why: confirms the four sub-scores that survived the 2026-05-23
+    // field-test pruning (Findings 2, 3, 5) still render. compass /
+    // headingDelta / obs / walked were intentionally removed from the
+    // HUD; they remain on the report for background metrics + tests but
+    // are no longer in the detail panel.
+    updateTrackingQuality(
+      makeReport({
+        subScores: {
+          convergence: 0.91,
+          residualConsensus: 0.72,
+          compassAgreement: 0.88,
+          gpsAccuracy: 0.65,
+          coverage: 1.0,
+        },
+      })
+    );
+
+    expect(document.getElementById('tq-convergence')!.textContent).toContain(
+      '91%'
+    );
+    expect(document.getElementById('tq-residual')!.textContent).toContain(
+      '72%'
+    );
+    expect(document.getElementById('tq-gps-accuracy')!.textContent).toContain(
+      '65%'
+    );
+    expect(document.getElementById('tq-coverage')!.textContent).toContain(
+      '100%'
+    );
+  });
+
+  // Why: Findings 2 & 3 removed compass / heading / obs / walked from the
+  // HUD. Guard the deletion so a careless re-add is caught.
+  it('does not render compass, heading, obs, or walked elements', () => {
+    updateTrackingQuality(makeReport());
+    expect(document.getElementById('tq-compass')).toBeNull();
+    expect(document.getElementById('tq-heading-delta')).toBeNull();
+    expect(document.getElementById('tq-compass-drift')).toBeNull();
+    expect(document.getElementById('tq-obs-count')).toBeNull();
+    expect(document.getElementById('tq-walked')).toBeNull();
+  });
+
+  // Why: Finding 6 — the two raw alignment-motion sums sit next to
+  // `Conv:` in the HUD so the user can see *how much* and *on which
+  // axis* the alignment is moving when the smoothed convergence score
+  // looks suspicious. The values come straight from
+  // `diagnostics.recentSum…` (no rounding to %), with 2 decimal places
+  // and the °/m suffixes the user expects in the field.
+  it('renders ΣΔrot and ΣΔpos sums from diagnostics (Finding 6)', () => {
+    updateTrackingQuality(
+      makeReport({
+        diagnostics: {
+          recentSumRotationDeltaDeg: 3.456,
+          recentSumTranslationDeltaM: 0.789,
+          medianResidualM: 2.0,
+          medianRecentGpsAccuracyM: 5.0,
+          walkedDistanceM: 42,
+          directionSpreadDeg: 120,
+          headingDeltaDeg: null,
+          compassDriftDetected: false,
+          observationsSeen: 25,
+          gpsVsFusedMaxDivergenceM: 3.1,
+        },
+      })
+    );
+    expect(document.getElementById('tq-sum-rot')!.textContent).toContain(
+      'ΣΔrot: 3.46°'
+    );
+    expect(document.getElementById('tq-sum-pos')!.textContent).toContain(
+      'ΣΔpos: 0.79m'
+    );
+  });
+});
+
+describe('tracking quality badge tap to expand/collapse', () => {
+  beforeEach(() => {
+    setupMinimalDOM();
+    initUI(createMockCallbacks());
+  });
+
+  // Why: details panel starts collapsed — users see the badge first.
+  it('starts with details panel hidden', () => {
+    updateTrackingQuality(makeReport());
+    const details = document.getElementById('tracking-quality-details')!;
+    expect(details.classList.contains('hidden')).toBe(true);
+  });
+
+  // Why: tapping the badge toggles the detail panel open.
+  it('expands details on badge click', () => {
+    updateTrackingQuality(makeReport());
+    const badge = document.getElementById('tracking-quality-badge')!;
+    badge.click();
+    const details = document.getElementById('tracking-quality-details')!;
+    expect(details.classList.contains('hidden')).toBe(false);
+  });
+
+  // Why: tapping again collapses the detail panel.
+  it('collapses details on second badge click', () => {
+    updateTrackingQuality(makeReport());
+    const badge = document.getElementById('tracking-quality-badge')!;
+    badge.click(); // expand
+    badge.click(); // collapse
+    const details = document.getElementById('tracking-quality-details')!;
+    expect(details.classList.contains('hidden')).toBe(true);
+  });
+});
+
+describe('hideTrackingQuality', () => {
+  beforeEach(() => {
+    setupMinimalDOM();
+    initUI(createMockCallbacks());
+  });
+
+  // Why: tracking quality indicator should hide when recording ends
+  // or when the session resets.
+  it('hides the tracking quality container', () => {
+    updateTrackingQuality(makeReport());
+    hideTrackingQuality();
+    const container = document.getElementById('tracking-quality')!;
+    expect(container.classList.contains('hidden')).toBe(true);
+  });
+
+  // Why: re-showing after hide should reset expanded state.
+  it('collapses details when hidden then re-shown', () => {
+    updateTrackingQuality(makeReport());
+    const badge = document.getElementById('tracking-quality-badge')!;
+    badge.click(); // expand
+    hideTrackingQuality();
+    updateTrackingQuality(makeReport());
+    const details = document.getElementById('tracking-quality-details')!;
+    expect(details.classList.contains('hidden')).toBe(true);
   });
 });

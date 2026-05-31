@@ -5,14 +5,30 @@
 [![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 [![Node](https://img.shields.io/node/v/gps-plus-slam-app-framework.svg)](https://nodejs.org/)
 
-Reusable building blocks for AR+GPS web apps built on top of the closed-source [gps-plus-slam-js](https://www.npmjs.com/package/gps-plus-slam-js) alignment core.
+Reusable building blocks for AR+GPS web apps, built on top of the closed-source [gps-plus-slam-js](https://www.npmjs.com/package/gps-plus-slam-js) alignment core.
 
-This package gives you the four big concrete capabilities every location-based AR app needs, so your code can stay focused on UI and product logic:
+It is part toolkit, part fusion engine: the toolkit covers the AR + GPS plumbing every app needs anyway, and the fusion engine lifts location accuracy to the point where ideas that previously sat on the "someday, on native" shelf become reachable in a browser:
 
 - A **WebXR + Three.js scene** with image and depth capture, replay rendering, and tracking-state monitoring.
 - **GPS, orientation, and permission wiring** ready to plug into the store.
 - **OPFS + ZIP record & replay** with a `StorageBackend` interface you can swap.
 - A **composable Redux store factory** (`createSlamAppStore`) that combines the core library's reducers with your own slices.
+
+## Why use GPS+SLAM? (Visual Stability Beyond Raw GPS)
+
+Raw GPS is useful for getting near a place, but it still jitters by meters and altitude is usually the hardest channel to trust. Most location-based AR apps work around that with broad proximity zones, floating beacons, or oversized highlights — fine as a fallback, but limiting if you want content that sits exactly on a path, a wall, or a specific spot on the ground.
+
+GPS+SLAM fuses GPS observations with the device's AR odometry, so as the user moves the alignment between the AR world and real-world coordinates gets more stable. On top of that, the framework gives you placement helpers for objects that should stay tied to a real location:
+
+- **Alignment improves with motion:** Once the user has walked for roughly 15 seconds in representative outdoor conditions, the solver has enough baseline that visible drift drops well below raw GPS. How stable it actually feels still depends on the device, the environment, and how clean the GPS track is — but in our own outdoor tests it consistently held up well enough for content that needs to sit on a specific spot.
+- **VPS-like benefits without a VPS dependency:** Cloud visual-positioning systems can work well, but they usually require network access and a provider-maintained scan of the place where the user stands. GPS+SLAM localizes from the device's own GPS, camera tracking, motion, and orientation sensors, so the same alignment approach works in rural areas, woods, mountains, and private sites that no VPS provider has pre-scanned.
+- **Just a URL, no app install:** The whole experience runs in the mobile browser through WebXR, so end users open a link and are in AR within seconds. There is no app-store gate, no native build per platform, and authors can iterate on the live URL while users keep using the same link.
+- **Heading does not depend only on the compass:** Phone compass data can be noisy, biased, or temporarily wrong enough to make a naive AR overlay rotate in the wrong direction. GPS+SLAM can infer the world heading from how the user actually moves through space, so after the user has walked a few meters the overlay no longer has to trust the device-orientation readings.
+- **Session-local objects stay fixed:** Objects created directly in the AR scene can stay at the same 3D position for the current session, independent of later GPS alignment updates. This is ideal for content the user creates live, such as a 3D trail of the path they walked, temporary markers, or objects they place by hand in the world.
+- **Anchors make placed content shareable:** When an object should also be tied to a GPS coordinate for replay, persistence, or sharing with other users, `createGpsAnchor` bootstraps from median GPS samples, keeps the Three.js object positioned from its GPS target inside `arWorldGroup`, and can defer small corrections until the object is off-screen. Large alignment jumps still force a correction so content does not remain in a stale location.
+- **Use exact paths and POIs, not only blobs:** Proximity zones remain a good UX for letting users enter an experience from any direction, but they do not have to be the only interaction model. The framework is designed for route-following cues, authored POI objects, precise areas of interest, and other content that benefits from being visibly tied to a real-world path or location.
+
+Don't take any of this on trust. Because everything runs in the browser, the fastest review is to open one of the example URLs on your own phone, step outside, drop an object, walk around it, and judge for yourself whether the stability holds up for your use case.
 
 ## Architecture
 
@@ -166,6 +182,30 @@ const blob = await exportSessionAsZip(sessionHandle, {
 });
 ```
 
+## Scene-Graph Convention
+
+The framework's WebXR scene is laid out so that the **scene root is GPS-aligned (NUE) space**:
+
+```
+scene                             ← GPS-aligned (NUE) space, the scene root
+├── arWorldGroup                  ← carries the alignment matrix (GPS → AR)
+│   ├── camera                    ← WebXR XRViewerPose (raw AR pose)
+│   └── ar-content                ← anything fixed in AR space
+│                                   (planes, point clouds, hit-test reticles, …)
+└── ..objects with gps coords..   ← anything anchored to GPS coordinates
+                                    (waypoints, POIs, navigation arrows, …)
+```
+
+When the alignment solver produces a new matrix, the framework writes it to `arWorldGroup.matrix`. The camera moves with `arWorldGroup`; objects parented directly to `scene` do not.
+
+**Three options for placing your own `Object3D`:**
+
+1. **Add it to `scene`** (with NUE-meter coordinates from `calcRelativeCoordsInMeters(zeroRef, …)`). The object's world pose stays at the correct latitude/longitude/altitude forever, but every time the alignment matrix is corrected the camera shifts inside `arWorldGroup`, so from the user's AR view the object visually "floats". Cheap and correct, but ugly during corrections — fine for small markers (e.g. ref-point spheres), not great for richer GPS-anchored content.
+2. **Add it to `arWorldGroup`** with a fixed local transform. The object is frozen relative to AR-tracked content and stays visually fixed at the same 3D position for this session. This is a good fit for user-created local content such as a walked path, a temporary marker, a hit-test reticle, or an object the user placed by hand. The tradeoff is that its world / GPS pose drifts every time alignment is corrected, so this mode is not enough when the object must be replayed or shared by GPS coordinate.
+3. **Use `createGpsAnchor` for objects that should stay visually stable at a GPS target.** The anchor owns a single `Object3D` inside `arWorldGroup`, bootstraps from median GPS samples unless `skipBootstrap` is set, and re-derives the object's local pose from the current GPS target and alignment state. In the default `snap-when-offscreen` mode, small corrections are committed while the object is outside the camera frustum, making small alignment corrections hard to notice; larger alignment jumps bypass that gate so the object does not stay in a stale location. Use `snap-every-tick` when correctness is more important than hiding visible position changes.
+
+A pure-function `syncGpsAnchoredMeshes` reconciler (option 1, bulk markers) is shipped by the RecorderApp. Use `createGpsAnchor` when a single visible object, route cue, or POI needs the more careful bootstrap and correction policy.
+
 ## Modules
 
 ### `ar/` — WebXR & 3D Scene
@@ -180,7 +220,6 @@ WebXR session lifecycle, Three.js renderer setup, image/depth capture, replay sc
 | `ImageCaptureManager`                        | Configurable camera frame capture pipeline       |
 | `DepthSampler`                               | Depth buffer sampling with configurable grids    |
 | `CameraBlitCapture`                          | GPU blit-based camera capture                    |
-| `TrackingStateManager`                       | AR tracking state monitoring                     |
 | `initReplayScene(container)`                 | Create a 3D replay scene with orbit/FPS controls |
 | `applyChromiumProjectionLayerWorkaround`     | Workaround for Chromium camera-access edge cases |
 
@@ -246,18 +285,18 @@ H3-based proximity matching for GPS-anchored points (renamed from `ref-points/` 
 
 ### `visualization/` — Three.js & Maps
 
-| Export                         | Description                                                               |
-| ------------------------------ | ------------------------------------------------------------------------- |
-| `LeafletMapOverlay`            | 2D Leaflet map integrated via CSS3D into a 3D scene.                      |
-| `MapOverlay`                   | Tile-based 3D map overlay (no Leaflet dependency).                        |
-| `GpsEventVisualizer`           | Three.js spheres for GPS event positions.                                 |
-| `GpsAnchoredMeshManager`       | Generic primitive for managing a set of meshes anchored at GPS positions. |
-| `createAlignmentLerper()`      | Smooth alignment matrix interpolation.                                    |
-| `createCameraFollower()`       | Camera that tracks a moving target.                                       |
-| `createCss3dRendererManager()` | CSS3D renderer for HTML-in-3D overlays.                                   |
-| `createGpsCompassCubes()`      | Cardinal direction indicator cubes.                                       |
-| `VIS_COLORS`                   | Consistent color palette for visualizations.                              |
-| `disposeObject3D(obj)`         | Safe Three.js object disposal.                                            |
+| Export                         | Description                                            |
+| ------------------------------ | ------------------------------------------------------ |
+| `LeafletMapOverlay`            | 2D Leaflet map integrated via CSS3D into a 3D scene.   |
+| `MapOverlay`                   | Tile-based 3D map overlay (no Leaflet dependency).     |
+| `GpsEventVisualizer`           | Three.js spheres for GPS event positions.              |
+| `createAlignmentLerper()`      | Smooth alignment matrix interpolation.                 |
+| `createCameraFollower()`       | Camera that tracks a moving target.                    |
+| `createCss3dRendererManager()` | CSS3D renderer for HTML-in-3D overlays.                |
+| `createGpsCompassCubes()`      | Cardinal direction indicator cubes.                    |
+| `createGpsAnchor()`            | GPS-anchored placement helper for one Three.js object. |
+| `VIS_COLORS`                   | Consistent color palette for visualizations.           |
+| `disposeObject3D(obj)`         | Safe Three.js object disposal.                         |
 
 ### `utils/` — Logging & Helpers
 

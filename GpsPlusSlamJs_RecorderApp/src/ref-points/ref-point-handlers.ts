@@ -16,9 +16,7 @@ import { getCurrentScenarioHandle } from 'gps-plus-slam-app-framework/storage/fi
 import {
   saveRefPointObservation,
   type RefPointObservation,
-  type RefPointMark,
 } from '../storage/ref-point-loader';
-import type { ImportedRefPoint } from '../storage/ref-point-importer';
 import {
   showRefPointPicker,
   isRefPointPickerVisible,
@@ -29,16 +27,12 @@ import {
 } from 'gps-plus-slam-app-framework/state/gps-event-coordinator';
 import { showError, updateStatus } from '../ui/hud';
 import { showToast } from '../ui/toast';
+import type { GpsPoint, RawGpsPoint } from '../state/recorder-store';
 import {
-  markReferencePoint,
-  setImportedRefPoints as setImportedRefPointsAction,
-  incrementRefPointUsage,
-  clearSessionRefPointUsage as clearSessionRefPointUsageAction,
-  resetRefPointsState,
-  addCurrentRefPointMark,
-  selectCachedKnownRefPoints,
-  type GpsPoint,
-} from '../state/recorder-store';
+  addRefPointEntry,
+  resetRefPoints,
+  selectKnownAnchorsByCell,
+} from '../state/ref-points-slice';
 import { fusedGpsFromOdom } from 'gps-plus-slam-app-framework/utils/fused-path';
 import { createLogger } from 'gps-plus-slam-app-framework/utils/logger';
 import {
@@ -46,7 +40,11 @@ import {
   findNearbyGeoAnchor,
 } from 'gps-plus-slam-app-framework/geo/h3-proximity';
 import { webxrToNUE } from 'gps-plus-slam-app-framework/core';
-import type { Vector3, Quaternion } from 'gps-plus-slam-app-framework/core';
+import type {
+  Vector3,
+  Quaternion,
+  Matrix4,
+} from 'gps-plus-slam-app-framework/core';
 import type { RecorderStore } from '../state/recorder-store';
 
 const log = createLogger('RefPointHandlers');
@@ -78,12 +76,6 @@ export interface RefPointHandlers {
   // Proximity check for live button label + neighbor-cell detection
   checkNearbyRefPoint(lat: number, lng: number): NearbyRefPointInfo | undefined;
 
-  // State accessors
-  getImportedRefPoints(): ImportedRefPoint[];
-  setImportedRefPoints(refPoints: ImportedRefPoint[]): void;
-  getSessionRefPointUsage(): Map<string, number>;
-  clearSessionRefPointUsage(): void;
-
   // Lifecycle
   reset(): void;
 }
@@ -97,8 +89,8 @@ export function createRefPointHandlers(
 ): RefPointHandlers {
   // --- State ---
   // Only markRefPointInProgress remains as closure state (transient concurrency guard).
-  // importedRefPoints, cachedKnownRefPoints, sessionRefPointUsage are now in Redux
-  // (refPointsSlice) and accessed via deps.getStore().getState().refPoints.
+  // Ref-point entries live in the `refPoints` slice (the single source of
+  // truth after 5.7a-3 Option C of the 2026-05-27 slice-collapse plan).
   let markRefPointInProgress = false;
 
   /** Per-H3-cell cooldown to prevent accidental duplicate re-observations (Aachen audit Issue 3). */
@@ -152,10 +144,15 @@ export function createRefPointHandlers(
 
   function dispatchRefPointAction(
     refPointId: string,
+    refPointName: string,
     odomPosition: Vector3,
     odomRotation: Quaternion,
     gpsPoint: GpsPoint,
-    timestamp: number
+    timestamp: number,
+    _alignmentMatrix: Matrix4 | null | undefined,
+    fusedGpsPoint:
+      | { latitude: number; longitude: number; altitude?: number }
+      | undefined
   ): void {
     // Extract raw sensor fields from state-side GpsPoint for the action payload.
     // Derived fields (coordinates, weight, zeroRef, deviceRotation) are
@@ -167,13 +164,35 @@ export function createRefPointHandlers(
       deviceRotation: _d,
       ...rawGpsPoint
     } = gpsPoint;
+
+    // Single source of truth: the flat `refPoints` slice. Step 5.7 of
+    // the 2026-05-27 slice-collapse plan dropped the parallel
+    // `gpsData/markReferencePoint` dispatch; the library no longer
+    // tracks ref points. Carries the fused lat/lon (+altitude) snapshot
+    // in `RawGpsPoint` shape when an alignment matrix was in effect at
+    // mark-time, and the user/imported display name when known.
+    const fusedRaw: RawGpsPoint | undefined = fusedGpsPoint
+      ? {
+          ...rawGpsPoint,
+          latitude: fusedGpsPoint.latitude,
+          longitude: fusedGpsPoint.longitude,
+          altitude: fusedGpsPoint.altitude ?? rawGpsPoint.altitude,
+        }
+      : undefined;
+    // The raw WebXR AR pose (`odomPosition`/`odomRotation`) is the
+    // load-bearing input the investigation harness needs to recompute
+    // alignment from scratch for parameter sweeps. Without it, every new
+    // recording is silently useless for sweeps. See
+    // 2026-05-29-investigation-harness-refpoint-source-migration-plan.md §E.
     deps.getStore().dispatch(
-      markReferencePoint({
+      addRefPointEntry({
         id: refPointId,
+        timestamp,
+        name: refPointName,
+        rawGpsPoint,
         position: odomPosition,
         rotation: odomRotation,
-        rawGpsPoint,
-        timestamp,
+        ...(fusedRaw ? { gpsPoint: fusedRaw } : {}),
       })
     );
   }
@@ -201,39 +220,21 @@ export function createRefPointHandlers(
   }
 
   function visualizeRefPoint(
-    refPointId: string,
-    odomPosition: Vector3,
-    odomRotation: Quaternion,
-    lastGpsPoint: GpsPoint,
-    timestamp: number,
-    fusedGpsPoint?: { latitude: number; longitude: number; altitude?: number }
+    _refPointId: string,
+    _odomPosition: Vector3,
+    _odomRotation: Quaternion,
+    _lastGpsPoint: GpsPoint,
+    _timestamp: number,
+    _fusedGpsPoint?: { latitude: number; longitude: number; altitude?: number }
   ): void {
-    // Prefer fused GPS so the red current-session sphere sits where the
-    // next session's green sphere will appear (loader also prefers fused —
-    // see 2026-04-24-refpoint-positioning-investigation.md §7).
-    //
-    // Per-field fallback (Option B, 2026-04-29 user-feedback Finding 1):
-    // mirrors `flattenRefPointsToMarks` in the loader. Fused altitude may
-    // be undefined on legacy recordings (calcGpsCoords altitude-discard
-    // bug); falling back to raw altitude recovers the value the recorder
-    // originally intended. New recordings (post-fix) populate fused
-    // altitude themselves, so the fallback only fires for legacy data.
-    const gpsPosition = {
-      lat: fusedGpsPoint?.latitude ?? lastGpsPoint.latitude,
-      lon: fusedGpsPoint?.longitude ?? lastGpsPoint.longitude,
-      altitude: fusedGpsPoint?.altitude ?? lastGpsPoint.altitude,
-    };
-    const refPointMark: RefPointMark = {
-      id: refPointId,
-      odomPosition,
-      odomRotation,
-      gpsPosition,
-      timestamp,
-    };
-    // Finding 5: dispatch into the slice; the visualizer subscribes via
-    // wireStoreSubscribers and renders the red sphere from there.
-    // See docs/2026-04-30-refpoint-marks-into-redux-plan.md.
-    deps.getStore().dispatch(addCurrentRefPointMark(refPointMark));
+    // No-op as of Step 5.7a-2: the red current-session sphere is now
+    // driven exclusively by `wireRefPointSubscribers`, which subscribes
+    // to `selectRefPointEntries` over the V2 slice. (The previous
+    // `ref-point-mark-listener` middleware was deleted along with the
+    // parallel `gpsData/markReferencePoint` dispatch in 5.7a-1.)
+    // Keeping the function as a documented seam in case future visual
+    // side effects (e.g., animation, audio cue) need to attach to the
+    // live-mark flow only.
   }
 
   // --- Main handler ---
@@ -270,8 +271,10 @@ export function createRefPointHandlers(
       const currentH3 = gpsToH3(lastGpsPoint.latitude, lastGpsPoint.longitude);
       const scenarioHandle = getCurrentScenarioHandle();
 
-      // Read cached known ref points from Redux (memoized selector)
-      const cachedKnownRefPoints = selectCachedKnownRefPoints(
+      // Read cached known ref points from Redux (memoized selector).
+      // Step 5.4: source is the flat `refPoints` slice; grouping by H3
+      // cell happens in `selectKnownAnchorsByCell`.
+      const cachedKnownRefPoints = selectKnownAnchorsByCell(
         deps.getStore().getState().refPoints
       );
 
@@ -312,10 +315,7 @@ export function createRefPointHandlers(
         // New ref point: show picker for optional display name only.
         // No suggestion list — scenario IDs are H3 hex strings (meaningless to users)
         // and imported names refer to distant locations (no nearby match).
-        const sessionUsage = deps.getStore().getState()
-          .refPoints.sessionRefPointUsage;
-        const usageMap = new Map(Object.entries(sessionUsage));
-        const pickerResult = await showRefPointPicker([], usageMap);
+        const pickerResult = await showRefPointPicker([]);
         if (!pickerResult) {
           log.info('Reference point marking cancelled');
           return;
@@ -355,10 +355,13 @@ export function createRefPointHandlers(
       // Dispatch action to library
       dispatchRefPointAction(
         refPointId,
+        refPointName,
         odomPosition,
         odomRotation,
         lastGpsPoint,
-        timestamp
+        timestamp,
+        alignmentMatrix,
+        fusedGpsPoint
       );
 
       // Persist to disk
@@ -401,9 +404,6 @@ export function createRefPointHandlers(
         showToast(`Re-observed "${refPointName}"`, { severity: 'info' });
       }
 
-      // Track usage in current session (Issue 6) via Redux
-      deps.getStore().dispatch(incrementRefPointUsage(refPointId));
-
       // Record re-observation timestamp for cooldown (Aachen audit Issue 3)
       if (nearbyMatch) {
         lastReObservationTimestamp.set(nearbyMatch.h3Index, Date.now());
@@ -422,7 +422,8 @@ export function createRefPointHandlers(
       lat: number,
       lng: number
     ): NearbyRefPointInfo | undefined {
-      const cachedKnown = selectCachedKnownRefPoints(
+      // Step 5.4: matcher reads from the flat `refPoints` slice.
+      const cachedKnown = selectKnownAnchorsByCell(
         deps.getStore().getState().refPoints
       );
       const match = findNearbyGeoAnchor(lat, lng, cachedKnown);
@@ -434,21 +435,8 @@ export function createRefPointHandlers(
       };
     },
 
-    getImportedRefPoints: () =>
-      deps.getStore().getState().refPoints.importedRefPoints,
-    setImportedRefPoints: (refPoints: ImportedRefPoint[]) => {
-      deps.getStore().dispatch(setImportedRefPointsAction(refPoints));
-    },
-    getSessionRefPointUsage: () => {
-      const record = deps.getStore().getState().refPoints.sessionRefPointUsage;
-      return new Map(Object.entries(record));
-    },
-    clearSessionRefPointUsage: () => {
-      deps.getStore().dispatch(clearSessionRefPointUsageAction());
-    },
-
     reset: () => {
-      deps.getStore().dispatch(resetRefPointsState());
+      deps.getStore().dispatch(resetRefPoints());
       markRefPointInProgress = false;
       lastReObservationTimestamp.clear();
     },

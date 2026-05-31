@@ -1,4 +1,4 @@
-﻿/**
+/**
  * Store Subscribers — Unit Tests
  *
  * Tests for the extracted store subscriber logic (Iteration 4, Risk R2 fix).
@@ -22,6 +22,7 @@ import {
   type StoreSubscriberDeps,
   type SubscribableStore,
 } from './store-subscribers';
+import type { MapData } from '../visualization/map-data';
 
 // ---------------------------------------------------------------------------
 // Helpers — minimal mock factories
@@ -40,6 +41,8 @@ function makeState(
     gpsElements: {} as CombinedRootState['gpsElements'],
     arElements: {} as CombinedRootState['arElements'],
     recording: {} as CombinedRootState['recording'],
+    tracking: {} as CombinedRootState['tracking'],
+    trackingQuality: {} as CombinedRootState['trackingQuality'],
   };
 }
 
@@ -83,12 +86,19 @@ function makeMockDeps() {
     gpsEventVisualizer: {
       getZeroRef: vi.fn<() => LatLong | null>().mockReturnValue(null),
       setZeroRef: vi.fn<(zero: LatLong) => void>(),
-      addGpsEvent: vi.fn<(gpsCoords: Vector3, odomPosition: Vector3) => void>(),
+      addGpsEvent:
+        vi.fn<
+          (
+            gpsCoords: Vector3,
+            odomPosition: Vector3,
+            accuracy?: { horizontal?: number; vertical?: number }
+          ) => void
+        >(),
       addAlignmentSnapshot: vi.fn<(nuePosition: Vector3) => void>(),
     },
     mapOverlay: {
       setGpsPosition: vi.fn<(lat: number, lon: number) => void>(),
-      addRawGpsPoint: vi.fn<(lat: number, lon: number) => void>(),
+      render: vi.fn<(data: MapData) => void>(),
     },
   } satisfies StoreSubscriberDeps;
 }
@@ -191,7 +201,6 @@ describe('wireStoreSubscribers', () => {
             odometryPositions: [],
           },
           odometryPath: { positions: [], rotations: [] },
-          referencePoints: [],
         } as unknown as CombinedRootState['gpsData'],
       })
     );
@@ -236,7 +245,6 @@ describe('wireStoreSubscribers', () => {
             odometryPositions: [],
           },
           odometryPath: { positions: [], rotations: [] },
-          referencePoints: [],
         } as unknown as CombinedRootState['gpsData'],
       })
     );
@@ -280,7 +288,6 @@ describe('wireStoreSubscribers', () => {
             odometryPositions: [],
           },
           odometryPath: { positions: [], rotations: [] },
-          referencePoints: [],
         } as unknown as CombinedRootState['gpsData'],
       })
     );
@@ -306,7 +313,6 @@ describe('wireStoreSubscribers', () => {
             odometryPositions: [],
           },
           odometryPath: { positions: [], rotations: [] },
-          referencePoints: [],
         } as unknown as CombinedRootState['gpsData'],
       })
     );
@@ -352,7 +358,6 @@ describe('wireStoreSubscribers', () => {
             odometryPositions: [odom1],
           },
           odometryPath: { positions: [], rotations: [] },
-          referencePoints: [],
         } as unknown as CombinedRootState['gpsData'],
       })
     );
@@ -360,7 +365,8 @@ describe('wireStoreSubscribers', () => {
     expect(deps.gpsEventVisualizer.addGpsEvent).toHaveBeenCalledTimes(1);
     expect(deps.gpsEventVisualizer.addGpsEvent).toHaveBeenCalledWith(
       gpsPoint1.coordinates,
-      odom1
+      odom1,
+      undefined
     );
 
     // Second update: 2 GPS events — only the new one should be added
@@ -374,7 +380,6 @@ describe('wireStoreSubscribers', () => {
             odometryPositions: [odom1, odom2],
           },
           odometryPath: { positions: [], rotations: [] },
-          referencePoints: [],
         } as unknown as CombinedRootState['gpsData'],
       })
     );
@@ -382,7 +387,8 @@ describe('wireStoreSubscribers', () => {
     expect(deps.gpsEventVisualizer.addGpsEvent).toHaveBeenCalledTimes(2);
     expect(deps.gpsEventVisualizer.addGpsEvent).toHaveBeenLastCalledWith(
       gpsPoint2.coordinates,
-      odom2
+      odom2,
+      undefined
     );
   });
 
@@ -412,12 +418,139 @@ describe('wireStoreSubscribers', () => {
             odometryPositions: [],
           },
           odometryPath: { positions: [], rotations: [] },
-          referencePoints: [],
         } as unknown as CombinedRootState['gpsData'],
       })
     );
 
     expect(deps.gpsEventVisualizer.addGpsEvent).not.toHaveBeenCalled();
+  });
+
+  // --- showAccuracySpheres flag (rec31 altitude-drop investigation §3) ---
+  // Why these tests matter: live recording mode must keep the legacy fixed
+  // sphere (large ellipsoids are distracting); replay mode must forward
+  // GPS 1σ accuracies so the new visual diagnostic is available.
+
+  it('forwards latLongAccuracy / altitudeAccuracy when showAccuracySpheres is true', () => {
+    const gpsPoint = {
+      id: 'gps-1',
+      zeroRef: { lat: 50, lon: 8 },
+      latitude: 50.001,
+      longitude: 8.001,
+      altitude: 240,
+      latLongAccuracy: 4.5,
+      altitudeAccuracy: 12,
+      coordinates: [1, 0, 0] as Vector3,
+      weight: 1,
+      timestamp: Date.now(),
+    };
+    const odom: Vector3 = [0.5, 0, 0.5];
+
+    const mock = makeMockStore(makeState());
+    wireStoreSubscribers(mock.store, { ...deps, showAccuracySpheres: true });
+
+    mock.setState(
+      makeState({
+        gpsData: {
+          zero: { lat: 50, lon: 8 },
+          gpsEvents: {
+            alignmentMatrix: [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1],
+            gpsPositions: [gpsPoint],
+            odometryPositions: [odom],
+          },
+          odometryPath: { positions: [], rotations: [] },
+        } as unknown as CombinedRootState['gpsData'],
+      })
+    );
+
+    expect(deps.gpsEventVisualizer.addGpsEvent).toHaveBeenCalledWith(
+      gpsPoint.coordinates,
+      odom,
+      { horizontal: 4.5, vertical: 12 }
+    );
+  });
+
+  it('does NOT forward accuracies when showAccuracySpheres is false (default)', () => {
+    const gpsPoint = {
+      id: 'gps-1',
+      zeroRef: { lat: 50, lon: 8 },
+      latitude: 50.001,
+      longitude: 8.001,
+      altitude: 240,
+      latLongAccuracy: 4.5,
+      altitudeAccuracy: 12,
+      coordinates: [1, 0, 0] as Vector3,
+      weight: 1,
+      timestamp: Date.now(),
+    };
+    const odom: Vector3 = [0.5, 0, 0.5];
+
+    const mock = makeMockStore(makeState());
+    // No showAccuracySpheres prop → default false
+    wireStoreSubscribers(mock.store, deps);
+
+    mock.setState(
+      makeState({
+        gpsData: {
+          zero: { lat: 50, lon: 8 },
+          gpsEvents: {
+            alignmentMatrix: [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1],
+            gpsPositions: [gpsPoint],
+            odometryPositions: [odom],
+          },
+          odometryPath: { positions: [], rotations: [] },
+        } as unknown as CombinedRootState['gpsData'],
+      })
+    );
+
+    expect(deps.gpsEventVisualizer.addGpsEvent).toHaveBeenCalledWith(
+      gpsPoint.coordinates,
+      odom,
+      undefined
+    );
+  });
+
+  it('passes through undefined accuracy fields when showAccuracySpheres is true', () => {
+    // Why: the recording may have missing accuracy on some events (e.g. rec31
+    // has altitudeAccuracy === undefined for every sample). The visualizer's
+    // defensive fallback expects to see the partial object as-is, not get a
+    // synthesized default — that's the visualizer's responsibility, not the
+    // subscriber's.
+    const gpsPoint = {
+      id: 'gps-1',
+      zeroRef: { lat: 50, lon: 8 },
+      latitude: 50.001,
+      longitude: 8.001,
+      altitude: 240,
+      latLongAccuracy: 4.5,
+      // altitudeAccuracy intentionally missing
+      coordinates: [1, 0, 0] as Vector3,
+      weight: 1,
+      timestamp: Date.now(),
+    };
+    const odom: Vector3 = [0.5, 0, 0.5];
+
+    const mock = makeMockStore(makeState());
+    wireStoreSubscribers(mock.store, { ...deps, showAccuracySpheres: true });
+
+    mock.setState(
+      makeState({
+        gpsData: {
+          zero: { lat: 50, lon: 8 },
+          gpsEvents: {
+            alignmentMatrix: [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1],
+            gpsPositions: [gpsPoint],
+            odometryPositions: [odom],
+          },
+          odometryPath: { positions: [], rotations: [] },
+        } as unknown as CombinedRootState['gpsData'],
+      })
+    );
+
+    expect(deps.gpsEventVisualizer.addGpsEvent).toHaveBeenCalledWith(
+      gpsPoint.coordinates,
+      odom,
+      { horizontal: 4.5, vertical: undefined }
+    );
   });
 
   // --- Map overlay ---
@@ -447,7 +580,6 @@ describe('wireStoreSubscribers', () => {
             odometryPositions: [[0.5, 0, 0.5]],
           },
           odometryPath: { positions: [], rotations: [] },
-          referencePoints: [],
         } as unknown as CombinedRootState['gpsData'],
       })
     );
@@ -487,7 +619,6 @@ describe('wireStoreSubscribers', () => {
               odometryPositions: [[0.5, 0, 0.5]],
             },
             odometryPath: { positions: [], rotations: [] },
-            referencePoints: [],
           } as unknown as CombinedRootState['gpsData'],
         })
       );
@@ -509,7 +640,6 @@ describe('wireStoreSubscribers', () => {
             odometryPositions: [],
           },
           odometryPath: { positions: [], rotations: [] },
-          referencePoints: [],
         } as unknown as CombinedRootState['gpsData'],
       })
     );
@@ -517,10 +647,11 @@ describe('wireStoreSubscribers', () => {
     expect(deps.mapOverlay.setGpsPosition).not.toHaveBeenCalled();
   });
 
-  it('calls addRawGpsPoint on mapOverlay for each new GPS event', () => {
-    // Why: The Leaflet map overlay (Approach E) needs raw GPS breadcrumbs
-    // to draw the GPS path polyline. Each new GPS event should feed its
-    // lat/lng to the map overlay.
+  it('renders raw GPS path on mapOverlay for new GPS events', () => {
+    // Why: The Leaflet map overlay needs the raw GPS breadcrumbs to draw the
+    // GPS path polyline. Each store change rebuilds the full MapData snapshot
+    // and hands it to render(), so the rendered rawGpsPath must contain every
+    // GPS event's lat/lng.
     const mock = makeMockStore(makeState());
     wireStoreSubscribers(mock.store, deps);
 
@@ -556,24 +687,28 @@ describe('wireStoreSubscribers', () => {
             ],
           },
           odometryPath: { positions: [], rotations: [] },
-          referencePoints: [],
         } as unknown as CombinedRootState['gpsData'],
       })
     );
 
-    expect(deps.mapOverlay.addRawGpsPoint).toHaveBeenCalledTimes(2);
-    expect(deps.mapOverlay.addRawGpsPoint).toHaveBeenCalledWith(50.001, 8.001);
-    expect(deps.mapOverlay.addRawGpsPoint).toHaveBeenCalledWith(50.002, 8.002);
+    expect(deps.mapOverlay.render).toHaveBeenCalled();
+    const lastData = (
+      deps.mapOverlay.render as ReturnType<typeof vi.fn>
+    ).mock.calls.at(-1)![0] as MapData;
+    expect(lastData.rawGpsPath).toEqual([
+      { lat: 50.001, lng: 8.001, accuracy: undefined },
+      { lat: 50.002, lng: 8.002, accuracy: undefined },
+    ]);
   });
 
-  it('handles mapOverlay without addRawGpsPoint gracefully', () => {
+  it('handles mapOverlay without render gracefully', () => {
     // Why: Existing callers may pass a mapOverlay that only has setGpsPosition.
-    // The addRawGpsPoint call is optional-chained and must not throw.
+    // The render call is optional-chained and must not throw.
     const depsMinimal: StoreSubscriberDeps = {
       ...deps,
       mapOverlay: {
         setGpsPosition: vi.fn(),
-        // No addRawGpsPoint
+        // No render
       },
     };
 
@@ -601,7 +736,6 @@ describe('wireStoreSubscribers', () => {
               odometryPositions: [[0.5, 0, 0.5]],
             },
             odometryPath: { positions: [], rotations: [] },
-            referencePoints: [],
           } as unknown as CombinedRootState['gpsData'],
         })
       );
@@ -644,7 +778,6 @@ describe('wireStoreSubscribers', () => {
             odometryPositions: [odom],
           },
           odometryPath: { positions: [], rotations: [] },
-          referencePoints: [],
         } as unknown as CombinedRootState['gpsData'],
       })
     );
@@ -696,7 +829,6 @@ describe('wireStoreSubscribers', () => {
             odometryPositions: [odom1, odom2],
           },
           odometryPath: { positions: [], rotations: [] },
-          referencePoints: [],
         } as unknown as CombinedRootState['gpsData'],
       })
     );
@@ -734,7 +866,6 @@ describe('wireStoreSubscribers', () => {
               odometryPositions: [[0.5, 0, 0.5]],
             },
             odometryPath: { positions: [], rotations: [] },
-            referencePoints: [],
           } as unknown as CombinedRootState['gpsData'],
         })
       );
@@ -767,7 +898,6 @@ describe('wireStoreSubscribers', () => {
           odometryPositions: [odom1],
         },
         odometryPath: { positions: [], rotations: [] },
-        referencePoints: [],
       } as unknown as CombinedRootState['gpsData'],
     });
 
@@ -828,7 +958,6 @@ describe('wireStoreSubscribers', () => {
             odometryRotations: [odomRot],
           },
           odometryPath: { positions: [], rotations: [] },
-          referencePoints: [],
         } as unknown as CombinedRootState['gpsData'],
       })
     );
@@ -885,7 +1014,6 @@ describe('wireStoreSubscribers', () => {
             odometryRotations: [odomRot1],
           },
           odometryPath: { positions: [], rotations: [] },
-          referencePoints: [],
         } as unknown as CombinedRootState['gpsData'],
       })
     );
@@ -903,7 +1031,6 @@ describe('wireStoreSubscribers', () => {
             odometryRotations: [odomRot1, odomRot2],
           },
           odometryPath: { positions: [], rotations: [] },
-          referencePoints: [],
         } as unknown as CombinedRootState['gpsData'],
       })
     );
@@ -939,7 +1066,6 @@ describe('wireStoreSubscribers', () => {
               odometryRotations: [[0, 0, 0, 1]],
             },
             odometryPath: { positions: [], rotations: [] },
-            referencePoints: [],
           } as unknown as CombinedRootState['gpsData'],
         })
       );
@@ -981,7 +1107,6 @@ describe('wireStoreSubscribers', () => {
             odometryRotations: [],
           },
           odometryPath: { positions: [], rotations: [] },
-          referencePoints: [],
         } as unknown as CombinedRootState['gpsData'],
       })
     );
@@ -1027,7 +1152,6 @@ describe('wireStoreSubscribers', () => {
             odometryRotations: [],
           },
           odometryPath: { positions: [], rotations: [] },
-          referencePoints: [],
         } as unknown as CombinedRootState['gpsData'],
       });
     }
@@ -1288,7 +1412,6 @@ describe('wireStoreSubscribers', () => {
             odometryRotations: [],
           },
           odometryPath: { positions: [], rotations: [] },
-          referencePoints: [],
         } as unknown as CombinedRootState['gpsData'],
       });
     }
@@ -1393,7 +1516,6 @@ describe('wireStoreSubscribers', () => {
             odometryPositions: [odom],
           },
           odometryPath: { positions: [], rotations: [] },
-          referencePoints: [],
         } as unknown as CombinedRootState['gpsData'],
       })
     );
@@ -1427,7 +1549,6 @@ describe('wireStoreSubscribers', () => {
               odometryPositions: [[0.5, 0, 0.5]],
             },
             odometryPath: { positions: [], rotations: [] },
-            referencePoints: [],
           } as unknown as CombinedRootState['gpsData'],
         })
       );
@@ -1438,21 +1559,27 @@ describe('wireStoreSubscribers', () => {
   // Phase 1b: Map overlay — fused path, alignment snapshots, reference points
   // ---------------------------------------------------------------------------
 
-  describe('map overlay fused path (addFusedPoint)', () => {
+  describe('map overlay fused path (render)', () => {
     // Why these tests matter:
-    // The Leaflet map overlay (Approach E) shows a cyan fused path polyline.
-    // For each new GPS event, the subscriber must compute the fused GPS position
-    // (alignmentMatrix × odomPosition → calcGpsCoords) and feed it to the map.
+    // The Leaflet map overlay shows a cyan fused path polyline. On each store
+    // change the subscriber rebuilds the full MapData snapshot — whose fused
+    // path is recomputed from the latest alignment matrix (D2) — and hands it
+    // to render(). These tests assert the rendered fusedPath is correct.
 
-    it('calls addFusedPoint with fused GPS coordinates for each new event', () => {
+    function lastRenderData(d: StoreSubscriberDeps): MapData {
+      return (d.mapOverlay!.render as ReturnType<typeof vi.fn>).mock.calls.at(
+        -1
+      )![0] as MapData;
+    }
+
+    it('renders fused GPS coordinates for new events', () => {
       // Why: the fused path is the alignment-corrected trajectory and must
       // appear as a cyan polyline on the Leaflet map overlay.
       const depsWithFused: StoreSubscriberDeps = {
         ...deps,
         mapOverlay: {
           setGpsPosition: vi.fn(),
-          addRawGpsPoint: vi.fn(),
-          addFusedPoint: vi.fn(),
+          render: vi.fn<(data: MapData) => void>(),
         },
       };
 
@@ -1482,28 +1609,24 @@ describe('wireStoreSubscribers', () => {
               odometryPositions: [[10, 0, 0] as Vector3],
             },
             odometryPath: { positions: [], rotations: [] },
-            referencePoints: [],
           } as unknown as CombinedRootState['gpsData'],
         })
       );
 
-      expect(depsWithFused.mapOverlay!.addFusedPoint).toHaveBeenCalledTimes(1);
-      const [lat, lon] = (
-        depsWithFused.mapOverlay!.addFusedPoint as ReturnType<typeof vi.fn>
-      ).mock.calls[0];
+      const data = lastRenderData(depsWithFused);
+      expect(data.fusedPath).toHaveLength(1);
       // 10m north from lat 50 → lat ≈ 50 + 10/110989
-      expect(lat).toBeCloseTo(50 + 10 / 110989, 4);
-      expect(lon).toBeCloseTo(8, 4);
+      expect(data.fusedPath[0]!.lat).toBeCloseTo(50 + 10 / 110989, 4);
+      expect(data.fusedPath[0]!.lng).toBeCloseTo(8, 4);
     });
 
-    it('does not call addFusedPoint when alignment matrix is missing', () => {
+    it('renders an empty fused path when the alignment matrix is missing', () => {
       // Why: without alignment, the fused transform is undefined — skip.
       const depsWithFused: StoreSubscriberDeps = {
         ...deps,
         mapOverlay: {
           setGpsPosition: vi.fn(),
-          addRawGpsPoint: vi.fn(),
-          addFusedPoint: vi.fn(),
+          render: vi.fn<(data: MapData) => void>(),
         },
       };
 
@@ -1530,22 +1653,21 @@ describe('wireStoreSubscribers', () => {
               odometryPositions: [[10, 0, 0] as Vector3],
             },
             odometryPath: { positions: [], rotations: [] },
-            referencePoints: [],
           } as unknown as CombinedRootState['gpsData'],
         })
       );
 
-      expect(depsWithFused.mapOverlay!.addFusedPoint).not.toHaveBeenCalled();
+      const data = lastRenderData(depsWithFused);
+      expect(data.fusedPath).toEqual([]);
     });
 
-    it('does not call addFusedPoint when zeroRef is missing', () => {
+    it('renders an empty fused path when zeroRef is missing', () => {
       // Why: without the GPS origin, NUE→GPS conversion is impossible.
       const depsWithFused: StoreSubscriberDeps = {
         ...deps,
         mapOverlay: {
           setGpsPosition: vi.fn(),
-          addRawGpsPoint: vi.fn(),
-          addFusedPoint: vi.fn(),
+          render: vi.fn<(data: MapData) => void>(),
         },
       };
 
@@ -1572,18 +1694,22 @@ describe('wireStoreSubscribers', () => {
               odometryPositions: [[10, 0, 0] as Vector3],
             },
             odometryPath: { positions: [], rotations: [] },
-            referencePoints: [],
           } as unknown as CombinedRootState['gpsData'],
         })
       );
 
-      expect(depsWithFused.mapOverlay!.addFusedPoint).not.toHaveBeenCalled();
+      const data = lastRenderData(depsWithFused);
+      expect(data.fusedPath).toEqual([]);
     });
 
-    it('handles mapOverlay without addFusedPoint gracefully', () => {
-      // Why: existing callers may not provide addFusedPoint — must not crash.
+    it('handles mapOverlay without render gracefully', () => {
+      // Why: existing callers may not provide render — must not crash.
+      const depsNoRender: StoreSubscriberDeps = {
+        ...deps,
+        mapOverlay: { setGpsPosition: vi.fn() },
+      };
       const mock = makeMockStore(makeState());
-      wireStoreSubscribers(mock.store, deps); // deps.mapOverlay has no addFusedPoint
+      wireStoreSubscribers(mock.store, depsNoRender);
 
       expect(() => {
         mock.setState(
@@ -1608,7 +1734,6 @@ describe('wireStoreSubscribers', () => {
                 odometryPositions: [[0.5, 0, 0.5]],
               },
               odometryPath: { positions: [], rotations: [] },
-              referencePoints: [],
             } as unknown as CombinedRootState['gpsData'],
           })
         );
@@ -1650,19 +1775,18 @@ describe('wireStoreSubscribers', () => {
             odometryRotations: [],
           },
           odometryPath: { positions: [], rotations: [] },
-          referencePoints: [],
         } as unknown as CombinedRootState['gpsData'],
       });
     }
 
-    it('calls mapOverlay.addAlignmentSnapshot with GPS coords when alignment changes', () => {
-      // Why: the 2D map needs a red marker at each alignment snapshot position.
+    it('renders alignment snapshot GPS coords when alignment changes', () => {
+      // Why: the 2D map needs a red snapshot polyline; the snapshot GPS coords
+      // are accumulated and passed through render() in MapData.alignmentSnapshots.
       const depsWithSnapshot: StoreSubscriberDeps = {
         ...deps,
         mapOverlay: {
           setGpsPosition: vi.fn(),
-          addRawGpsPoint: vi.fn(),
-          addAlignmentSnapshot: vi.fn(),
+          render: vi.fn<(data: MapData) => void>(),
         },
       };
 
@@ -1687,26 +1811,23 @@ describe('wireStoreSubscribers', () => {
         })
       );
 
-      expect(
-        depsWithSnapshot.mapOverlay!.addAlignmentSnapshot
-      ).toHaveBeenCalledTimes(1);
-      const [lat, lon] = (
-        depsWithSnapshot.mapOverlay!.addAlignmentSnapshot as ReturnType<
-          typeof vi.fn
-        >
-      ).mock.calls[0];
-      expect(lat).toBeCloseTo(50 + 10 / 110989, 4);
-      expect(lon).toBeCloseTo(8, 4);
+      const renderMock = depsWithSnapshot.mapOverlay!.render as ReturnType<
+        typeof vi.fn
+      >;
+      expect(renderMock).toHaveBeenCalled();
+      const data = renderMock.mock.calls.at(-1)![0] as MapData;
+      expect(data.alignmentSnapshots).toHaveLength(1);
+      expect(data.alignmentSnapshots[0]!.lat).toBeCloseTo(50 + 10 / 110989, 4);
+      expect(data.alignmentSnapshots[0]!.lng).toBeCloseTo(8, 4);
     });
 
-    it('does not call mapOverlay.addAlignmentSnapshot when zeroRef is missing', () => {
+    it('renders no alignment snapshots when zeroRef is missing', () => {
       // Why: without GPS origin, NUE→GPS conversion is impossible.
       const depsWithSnapshot: StoreSubscriberDeps = {
         ...deps,
         mapOverlay: {
           setGpsPosition: vi.fn(),
-          addRawGpsPoint: vi.fn(),
-          addAlignmentSnapshot: vi.fn(),
+          render: vi.fn<(data: MapData) => void>(),
         },
       };
 
@@ -1721,7 +1842,6 @@ describe('wireStoreSubscribers', () => {
               odometryRotations: [],
             },
             odometryPath: { positions: [], rotations: [] },
-            referencePoints: [],
           } as unknown as CombinedRootState['gpsData'],
         })
       );
@@ -1747,20 +1867,25 @@ describe('wireStoreSubscribers', () => {
               odometryRotations: [],
             },
             odometryPath: { positions: [], rotations: [] },
-            referencePoints: [],
           } as unknown as CombinedRootState['gpsData'],
         })
       );
 
-      expect(
-        depsWithSnapshot.mapOverlay!.addAlignmentSnapshot
-      ).not.toHaveBeenCalled();
+      const renderMock = depsWithSnapshot.mapOverlay!.render as ReturnType<
+        typeof vi.fn
+      >;
+      const lastData = renderMock.mock.calls.at(-1)?.[0] as MapData | undefined;
+      expect(lastData?.alignmentSnapshots ?? []).toEqual([]);
     });
 
-    it('handles mapOverlay without addAlignmentSnapshot gracefully', () => {
-      // Why: existing callers may not provide addAlignmentSnapshot — must not crash.
+    it('handles mapOverlay without render gracefully', () => {
+      // Why: existing callers may not provide render — must not crash.
+      const depsNoRender: StoreSubscriberDeps = {
+        ...deps,
+        mapOverlay: { setGpsPosition: vi.fn() },
+      };
       const mock = makeMockStore(makeGpsState());
-      wireStoreSubscribers(mock.store, deps);
+      wireStoreSubscribers(mock.store, depsNoRender);
 
       expect(() => {
         mock.setState(
