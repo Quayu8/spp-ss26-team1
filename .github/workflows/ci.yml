@@ -9,6 +9,27 @@ permissions:
   contents: read
 
 jobs:
+  deadcode:
+    name: Dead code (knip)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "pnpm"
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      # Whole-workspace knip pass. Runs as its own job so dead-code
+      # enforcement is independent of the test suite (no framework build, no
+      # Playwright browsers) and a finding is attributed to this step rather
+      # than masquerading as a Starter test failure.
+      - name: Check for dead code
+        run: pnpm run check:deadcode
+
   test:
     name: Test (all workspaces)
     runs-on: ubuntu-latest
@@ -35,8 +56,9 @@ jobs:
 
       # Root `pnpm test` runs: repo-config + framework + recorder (core + e2e)
       # + anchor-starter + minimal example. This is the single source of truth,
-      # matching the command developers run locally. (The starter gate's
-      # check:deadcode delegates to the root knip, so knip runs here too.)
+      # matching the command developers run locally. (knip also runs here
+      # transitively via the starter gate, but the dedicated `deadcode` job
+      # above is the authoritative gate.)
       - name: Run full test suite
         run: pnpm test
 
