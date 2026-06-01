@@ -34,8 +34,9 @@ jobs:
         run: pnpm exec playwright install --with-deps chromium
 
       # Root `pnpm test` runs: repo-config + framework + recorder (core + e2e)
-      # + minimal example. This is the single source of truth, matching the
-      # command developers run locally.
+      # + anchor-starter + minimal example. This is the single source of truth,
+      # matching the command developers run locally. (The starter gate's
+      # check:deadcode delegates to the root knip, so knip runs here too.)
       - name: Run full test suite
         run: pnpm test
 
