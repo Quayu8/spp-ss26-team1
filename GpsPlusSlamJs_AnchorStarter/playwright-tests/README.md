@@ -17,16 +17,24 @@ pnpm run test:e2e:ui       # Playwright UI mode for debugging
 
 ## Scope
 
-Currently **Tier 0** only — smoke + the E1 capability gate — which needs no
-browser-API mocking because Playwright Chromium genuinely lacks WebXR. See the
-plan and its tiers in
+**Tier 0 + Tier 1** are both implemented. **Tier 0** (`smoke.spec.js`) is the
+smoke + E1 capability gate, which needs no browser-API mocking because Playwright
+Chromium genuinely lacks WebXR. **Tier 1** (`placement-flow.spec.js` +
+`share-link.spec.js`) drives the full application flow over a DEV-only framework
+seam (`window.__anchorStarterSeams`, installed by `fakes.js` and statically
+stripped from production): boot → onboarding guidance → soft-gated placement →
+the `?show=` URL round-trip → copy-link success/failure. See the plan and its
+tiers in
 [2026-06-01-anchor-starter-e2e-test-plan.md](../../../gps-plus-slam/GpsPlusSlamJs_Docs/docs/2026-06-01-anchor-starter-e2e-test-plan.md).
-
-Tier 1 (full happy-path via a DEV-only framework seam) is planned but not yet
-implemented.
 
 ## Files
 
 - [playwright.config.js](playwright.config.js) — Chromium, port 5181, clipboard
   permissions, framework-build prerequisite.
 - [smoke.spec.js](smoke.spec.js) — the Tier 0 cases.
+- [fakes.js](fakes.js.md) — installs the DEV seam fakes + the
+  `window.__anchorStarterTest` control surface for the Tier 1 specs.
+- [placement-flow.spec.js](placement-flow.spec.js) — Tier 1 boot / guidance /
+  placement / `?show=` round-trip / failure-revert cases.
+- [share-link.spec.js](share-link.spec.js) — Tier 1 copy-link success / failure
+  cases.

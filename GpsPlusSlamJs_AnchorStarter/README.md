@@ -46,13 +46,20 @@ capability-gated message instead of crashing (decision E1).
 ```bash
 pnpm test         # full gate: static checks + unit tests + Playwright e2e
 pnpm run test:core  # static checks + unit tests only (no browser)
-pnpm run test:e2e   # Playwright Tier 0 smoke / capability-gate suite
+pnpm run test:e2e   # Playwright Tier 0 + Tier 1 e2e suite
 ```
 
 The e2e suite lives in [`playwright-tests/`](playwright-tests/README.md) and
-boots the app in headless Chromium to assert the start screen, the hidden
-guidance/placement panels, and the E1 capability gate. `test:e2e` rebuilds the
-consumed framework `dist/` first so Vite never serves a stale bundle.
+boots the app in headless Chromium. **Tier 0** (`smoke.spec.js`) needs no
+mocking and asserts the start screen, the hidden guidance/placement panels, and
+the E1 capability gate (real Chromium genuinely lacks WebXR). **Tier 1**
+(`placement-flow.spec.js` + `share-link.spec.js`) drives the full application
+flow over a DEV-only test seam (`window.__anchorStarterSeams`, installed by
+[`fakes.js`](playwright-tests/fakes.js.md) and statically stripped from
+production): boot → onboarding guidance → soft-gated placement → the `?show=`
+URL round-trip (place, reload, restore) → copy-link success/failure. `test:e2e`
+rebuilds the consumed framework `dist/` first so Vite never serves a stale
+bundle.
 
 ## How it is structured
 
