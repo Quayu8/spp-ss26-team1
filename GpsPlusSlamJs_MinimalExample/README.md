@@ -57,6 +57,9 @@ with an explanatory label.
 - [src/placement.ts](src/placement.ts) — pure tap-to-place view-model: the GPS
   gate + the deliberate scene-root floater (unit-tested in
   [src/placement.test.ts](src/placement.test.ts)).
+- [src/co-spawn.ts](src/co-spawn.ts) — pure contrast co-spawn: places the
+  floater cube and a `createGpsAnchor` marker at the same world pose under
+  different parents (unit-tested in [src/co-spawn.test.ts](src/co-spawn.test.ts)).
 - [src/status.ts](src/status.ts) — pure formatter for the status text
   (unit-tested in [src/status.test.ts](src/status.test.ts)).
 - [src/boot.test.ts](src/boot.test.ts) — headless smoke test that the framework

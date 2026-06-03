@@ -27,8 +27,16 @@ integration over `createEnableGpsArController` + `registerXrFrameUpdate`.
   [reticle.ts](reticle.ts).
 - Wires the AR `select` (tap) through the GPS gate in [placement.ts](placement.ts):
   before the first GPS fix a tap flashes a transient "waiting for GPS…" hint;
-  after a fix it places the root cube under the GPS-aligned scene root at the
-  reticle's world position (the _intentional_ floater).
+  after a fix it co-spawns the contrast pair (see below).
+- Feeds GPS + orientation into the store: dispatches `startSession` when AR
+  starts (recording must be active), forwards every fix through
+  `createGpsPositionHandler` and every orientation sample through
+  `updateDeviceOrientation`, so the alignment matrix the anchor reads is live.
+- On a valid tap, `placeContrastPair` co-spawns (via [co-spawn.ts](co-spawn.ts))
+  the deliberate floater cube under the scene root and an anchored marker under
+  `arWorldGroup` at the same world pose, then hands the marker to
+  `createGpsAnchor` in its **default bootstrap** (no `skipBootstrap`,
+  `mode: 'snap-when-offscreen'`, seeded with the latest GPS fix).
 
 ## Invariants & assumptions
 

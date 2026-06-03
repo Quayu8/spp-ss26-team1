@@ -23,20 +23,33 @@
 import {
   createEnableGpsArController,
   getArWorldGroup,
+  getCamera,
+  getCurrentArPose,
   getScene,
   registerXrFrameUpdate,
   type EnableGpsArState,
 } from 'gps-plus-slam-app-framework/ar';
 import {
+  createGpsPositionHandler,
   createSlamAppStore,
+  selectAlignmentMatrix,
   selectGpsPositions,
+  selectZeroReference,
+  startSession,
+  updateDeviceOrientation,
 } from 'gps-plus-slam-app-framework/state';
 import { NullStorageBackend } from 'gps-plus-slam-app-framework/storage';
-import type { GpsPosition } from 'gps-plus-slam-app-framework/sensors';
+import type {
+  GpsPosition,
+  RawDeviceOrientation,
+} from 'gps-plus-slam-app-framework/sensors';
+import { createGpsAnchor } from 'gps-plus-slam-app-framework/visualization';
+import type { LatLong, LatLongAlt } from 'gps-plus-slam-app-framework/core';
 import { Vector3 } from 'three';
 
+import { ANCHOR_MODE, coSpawnAtWorldPose } from './co-spawn.js';
 import { createReticleMesh, updateReticle } from './reticle.js';
-import { decideTapPlacement, placeRootCube } from './placement.js';
+import { decideTapPlacement } from './placement.js';
 import { formatStatus } from './status.js';
 
 function getElement<T extends HTMLElement>(id: string): T {
@@ -82,17 +95,17 @@ async function requestHitTestSource(
 
 /**
  * Install the hit-test reticle and tap-to-place once AR is running. Ordinary
- * three.js example code apart from two framework deltas: the reticle is parented
- * under `arWorldGroup` (AR-local), while the placed cube goes under `scene`
- * (GPS-aligned root) — the deliberate floater of the contrast demo.
+ * three.js example code apart from parenting the reticle under `arWorldGroup`
+ * (AR-local). The actual placement (the contrast co-spawn) is delegated to
+ * `onPlace` so the store-bound `createGpsAnchor` wiring stays in `main()`.
  */
 function startArInteraction(deps: {
   hasGpsFix: () => boolean;
   onWaitingForGps: () => void;
+  onPlace: (worldPosition: Vector3) => void;
 }): void {
   const arWorldGroup = getArWorldGroup();
-  const scene = getScene();
-  if (!arWorldGroup || !scene) {
+  if (!arWorldGroup) {
     return;
   }
   const reticle = createReticleMesh();
@@ -119,10 +132,8 @@ function startArInteraction(deps: {
         if (decision.kind === 'no-surface') {
           return;
         }
-        // The reticle's world transform is current from the last rendered frame;
-        // place the cube under the GPS-aligned root at that world position.
-        const worldPosition = reticle.getWorldPosition(new Vector3());
-        placeRootCube(scene, worldPosition);
+        // The reticle's world transform is current from the last rendered frame.
+        deps.onPlace(reticle.getWorldPosition(new Vector3()));
       });
     }
 
@@ -153,15 +164,24 @@ function startArInteraction(deps: {
   });
 }
 
+/** Narrow a GPS fix to the anchor's seed shape (drop altitude when absent). */
+function toGpsSeed(position: GpsPosition): LatLong | LatLongAlt {
+  return typeof position.altitude === 'number'
+    ? { lat: position.lat, lon: position.lon, altitude: position.altitude }
+    : { lat: position.lat, lon: position.lon };
+}
+
 function main(): void {
   const statusEl = getElement<HTMLPreElement>('status');
   const button = getElement<HTMLButtonElement>('enter-ar');
   const arRoot = getElement<HTMLDivElement>('ar-root');
 
-  // The store boots the framework end-to-end (covered by boot.test.ts); here it
-  // is the source of truth for the status panel's recording counters.
+  // The store boots the framework end-to-end (covered by boot.test.ts) and,
+  // once recording, fuses GPS + AR pose into the alignment matrix that
+  // createGpsAnchor reads.
   const store = createSlamAppStore({ storageBackend: new NullStorageBackend() });
   let gpsFixCount = 0;
+  let lastGps: LatLong | LatLongAlt | null = null;
 
   function refreshStatus(): void {
     statusEl.textContent = formatStatus({
@@ -183,17 +203,71 @@ function main(): void {
     hintTimer = setTimeout(refreshStatus, 1500);
   }
 
+  // GPS → store. The coordinator only records while a session is active and an
+  // AR pose is available, so it is created once and driven from onGpsPosition.
+  const gpsHandler = createGpsPositionHandler({
+    store,
+    getArPose: getCurrentArPose,
+  });
+
+  /**
+   * The Step 4 contrast co-spawn: place the deliberate floater cube under the
+   * scene root and an anchored marker under arWorldGroup at the same world pose,
+   * then hand the marker to createGpsAnchor in its default bootstrap.
+   */
+  function placeContrastPair(worldPosition: Vector3): void {
+    const scene = getScene();
+    const arWorldGroup = getArWorldGroup();
+    const camera = getCamera();
+    if (!scene || !arWorldGroup || !camera || lastGps === null) {
+      return;
+    }
+
+    const { anchorObject } = coSpawnAtWorldPose({ scene, arWorldGroup, worldPosition });
+
+    // Default bootstrap (NO skipBootstrap): the anchor holds the tapped pose
+    // while sampling GPS, then makes its first lazy correction off-screen.
+    // Each framework selector is typed against a slightly different internal
+    // root shape; only the slices it reads exist at runtime, so the cast through
+    // `unknown` is safe (same pattern as selectGpsPositions / AnchorStarter).
+    createGpsAnchor({
+      object3D: anchorObject,
+      arWorldGroup,
+      camera,
+      gpsPoint: lastGps,
+      mode: ANCHOR_MODE,
+      getAlignmentMatrix: () =>
+        selectAlignmentMatrix(
+          store.getState() as unknown as Parameters<typeof selectAlignmentMatrix>[0]
+        ),
+      getGpsZeroRef: (): LatLong | null =>
+        selectZeroReference(
+          store.getState() as unknown as Parameters<typeof selectZeroReference>[0]
+        ),
+      getCurrentGpsPoint: () => lastGps,
+    });
+  }
+
   const controller = createEnableGpsArController();
   controller.subscribe((state) => {
     const view = buttonView(state);
     button.textContent = view.label;
     button.disabled = view.disabled;
     if (state.status === 'running') {
+      // Recording must be active for the GPS coordinator to feed alignment.
+      store.dispatch(
+        startSession({
+          scenarioName: 'minimal-example',
+          sessionName: 'live',
+          startTime: Date.now(),
+        })
+      );
       startArInteraction({
         hasGpsFix: () => gpsFixCount > 0,
         onWaitingForGps: () => {
           showHint('waiting for GPS…');
         },
+        onPlace: placeContrastPair,
       });
     }
   });
@@ -202,9 +276,14 @@ function main(): void {
     void controller.enable({
       container: arRoot,
       requestHitTest: true,
-      onGpsPosition: (_position: GpsPosition) => {
+      onGpsPosition: (position: GpsPosition) => {
         gpsFixCount += 1;
+        lastGps = toGpsSeed(position);
+        gpsHandler(position);
         refreshStatus();
+      },
+      onOrientation: (orientation: RawDeviceOrientation) => {
+        updateDeviceOrientation(orientation);
       },
     });
   });
