@@ -1,23 +1,38 @@
 # gps-plus-slam minimal example
 
 The smallest end-to-end consumer of
-[`gps-plus-slam-app-framework`](../GpsPlusSlamJs_AppFramework/) — a
-single-file Vite app that boots `createRecorderStore()`, renders a
-spinning cube with Three.js, and shows a tiny status panel driven by
-the store.
+[`gps-plus-slam-app-framework`](../GpsPlusSlamJs_AppFramework/) — a single-file
+Vite app that boots `createSlamAppStore()`, then enters a **GPS + AR hit-test**
+session: an app-rendered "Enable GPS AR" button starts an immersive-ar session
+and a reticle tracks real-world surfaces under the screen centre.
+
+It is a structural port of the stock three.js `webxr_ar_hittest` example
+(button → AR session → reticle → tap-to-place), adapted for the GPS-aligned
+framework. The full design rationale lives in the plan doc
+[2026-06-03-threejs-arbutton-minimal-ar-example-user-feedback.md](../../gps-plus-slam/GpsPlusSlamJs_Docs/docs/2026-06-03-threejs-arbutton-minimal-ar-example-user-feedback.md).
+
+## The two framework deltas (what a porting developer must not get wrong)
+
+1. **App-rendered button.** Unlike three.js' `ARButton` (which injects its own
+   DOM), the framework exposes the permission / enter-AR *sequence* as a
+   headless controller (`createEnableGpsArController`). The app renders and
+   styles its **own** `<button>` over the controller's observable state.
+2. **Parenting.** Placed AR content (here, the reticle) is added under
+   `getArWorldGroup()` (AR-local space), **not** the GPS-aligned scene root
+   (`getScene()`). This is the single most important line to get right.
 
 ## Why this exists
 
 1. **Onboarding scaffold.** The full
    [recorder app](../GpsPlusSlamJs_RecorderApp/) is too big to read as
-   a "hello world". This example is intentionally trivial so the wiring
-   is obvious. For the next step up — a readable AR + GPS + persistence
-   demo — see the
-   [`GpsPlusSlamJs_AnchorStarter`](../GpsPlusSlamJs_AnchorStarter/)
-   starter (trivial → **starter** → full).
+   a "hello world". This example is intentionally minimal so the AR wiring is
+   obvious. For the next step up — a readable AR + GPS + persistence demo — see
+   the [`GpsPlusSlamJs_AnchorStarter`](../GpsPlusSlamJs_AnchorStarter/) starter
+   (minimal → **starter** → full).
 2. **Anonymous-install proof.** The package declares only
-   `gps-plus-slam-app-framework: workspace:*` for the sibling package - A clean `pnpm install` at the public-repo root that
-   successfully resolves the framework.
+   `gps-plus-slam-app-framework: workspace:*` for the sibling package — a clean
+   `pnpm install` at the public-repo root that successfully resolves the
+   framework.
 
 ## Run it
 
@@ -27,11 +42,20 @@ pnpm install
 pnpm --filter gps-plus-slam-minimal-example dev
 ```
 
-Then open the printed URL.
+Then open the printed URL **on an AR-capable device** (e.g. an Android phone
+with WebXR / immersive-ar). On unsupported devices the button stays disabled
+with an explanatory label.
 
 ## Layout
 
-- [index.html](index.html) — bare entry, one canvas + one status panel.
-- [src/main.ts](src/main.ts) — Three.js scene, store wiring, status updates.
+- [index.html](index.html) — bare entry: status panel, AR container
+  (`#ar-root`) and the "Enable GPS AR" button.
+- [src/main.ts](src/main.ts) — WebXR glue: button wiring over the controller,
+  hit-test source + reticle loop (verified manually on-device).
+- [src/reticle.ts](src/reticle.ts) — pure reticle view-model (unit-tested in
+  [src/reticle.test.ts](src/reticle.test.ts)).
 - [src/status.ts](src/status.ts) — pure formatter for the status text
-  (sole unit-tested module — see [src/status.test.ts](src/status.test.ts)).
+  (unit-tested in [src/status.test.ts](src/status.test.ts)).
+- [src/boot.test.ts](src/boot.test.ts) — headless smoke test that the framework
+  imports resolve and `createSlamAppStore({ NullStorageBackend })` boots
+  (keeps CI AR-hardware-free).
