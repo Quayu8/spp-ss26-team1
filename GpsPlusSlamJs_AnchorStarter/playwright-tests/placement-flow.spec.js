@@ -176,6 +176,41 @@ test.describe("Anchor starter — Tier 1 placement flow", () => {
     await expect(placeButton).toBeEnabled();
     await expect(page.getByTestId("copy-link-button")).toBeHidden();
   });
+
+  test("does not leak a marker into the scene when placement fails, and retries stay clean", async ({
+    page,
+  }) => {
+    // Why this matters: spawnAnchor adds the marker to the AR world group
+    // *before* createGpsAnchor runs. If creation throws (or any later step in
+    // placeAnchor does), the half-spawned marker must be removed — otherwise a
+    // retry stacks overlapping markers and leaks the frame-loop registration.
+    await bootAnchorStarter(page);
+    await pushGpsFix(page, SAMPLE_FIX);
+
+    const childCount = () =>
+      page.evaluate(() => window.__anchorStarterTest.worldGroupChildren.length);
+
+    await page.evaluate(() => {
+      window.__anchorStarterTest.failCreateAnchor = true;
+    });
+
+    // Two failed attempts in a row must never accumulate markers.
+    await page.getByTestId("place-button").click();
+    await expect(page.getByTestId("error")).not.toBeEmpty();
+    expect(await childCount()).toBe(0);
+
+    await page.getByTestId("place-button").click();
+    await expect(page.getByTestId("error")).not.toBeEmpty();
+    expect(await childCount()).toBe(0);
+
+    // Clear the fault and place successfully — exactly one marker remains.
+    await page.evaluate(() => {
+      window.__anchorStarterTest.failCreateAnchor = false;
+    });
+    await page.getByTestId("place-button").click();
+    await expect(page.getByTestId("place-button")).toHaveText("Saved ✓");
+    expect(await childCount()).toBe(1);
+  });
 });
 
 test.describe("Anchor starter — boot rollback", () => {

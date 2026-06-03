@@ -63,6 +63,13 @@ export async function installAnchorStarterFakes(page, options = {}) {
       gpsCallback: null,
       /** Arguments captured on every `createAnchorMarker` call. */
       markerCalls: [],
+      /**
+       * Markers currently attached to the faked AR world group. spawnAnchor
+       * adds a marker before creating the GpsAnchor and must remove it again
+       * on any failure; specs assert this stays empty after a failed placement
+       * (no orphaned mesh left to overlap a retry).
+       */
+      worldGroupChildren: [],
       /** Current report returned by the faked `selectTrackingQuality`. */
       trackingReport: cfg.trackingReport,
       /** When true, the faked `createGpsAnchor` throws (placement failure). */
@@ -94,7 +101,15 @@ export async function installAnchorStarterFakes(page, options = {}) {
       checkGeolocationPermission: () =>
         Promise.resolve({ supported: true, granted: true }),
       initAR: () => Promise.resolve(),
-      getArWorldGroup: () => ({ add() {} }),
+      getArWorldGroup: () => ({
+        add(child) {
+          control.worldGroupChildren.push(child);
+        },
+        remove(child) {
+          const index = control.worldGroupChildren.indexOf(child);
+          if (index !== -1) control.worldGroupChildren.splice(index, 1);
+        },
+      }),
       getCamera: () => ({}),
       startGpsWatch: (onPosition) => {
         control.gpsCallback = onPosition;

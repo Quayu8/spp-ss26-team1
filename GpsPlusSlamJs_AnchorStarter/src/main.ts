@@ -199,16 +199,38 @@ function spawnAnchor(
   }
   const marker = seams.createAnchorMarker(markerOptions);
   arWorldGroup.add(marker);
-  return seams.createGpsAnchor({
-    object3D: marker,
-    arWorldGroup,
-    camera,
-    gpsPoint,
-    skipBootstrap,
-    getAlignmentMatrix: () => sel(selectAlignmentMatrix),
-    getGpsZeroRef: (): LatLong | null => sel(selectZeroReference),
-    getCurrentGpsPoint: () => lastGps,
-  });
+
+  let gpsAnchor: GpsAnchor;
+  try {
+    gpsAnchor = seams.createGpsAnchor({
+      object3D: marker,
+      arWorldGroup,
+      camera,
+      gpsPoint,
+      skipBootstrap,
+      getAlignmentMatrix: () => sel(selectAlignmentMatrix),
+      getGpsZeroRef: (): LatLong | null => sel(selectZeroReference),
+      getCurrentGpsPoint: () => lastGps,
+    });
+  } catch (err) {
+    // createGpsAnchor failed *after* the marker was added to the scene — undo
+    // the add so a failed spawn never leaves an orphaned mesh behind that a
+    // later retry would overlap.
+    arWorldGroup.remove(marker);
+    throw err;
+  }
+
+  // The framework's `dispose()` only unregisters the anchor from the frame
+  // loop; it deliberately does NOT detach the marker from the scene graph
+  // (see gps-anchor.ts). Wrap it so disposing the anchor also removes its
+  // marker — making `anchor.dispose()` a complete teardown for every caller
+  // (placement retry, boot rollback, beforeunload).
+  const disposeAnchor = gpsAnchor.dispose.bind(gpsAnchor);
+  gpsAnchor.dispose = (): void => {
+    disposeAnchor();
+    arWorldGroup.remove(marker);
+  };
+  return gpsAnchor;
 }
 
 // ---------------------------------------------------------------------------
@@ -285,6 +307,12 @@ function placeAnchor(): void {
     writeShowParam([anchorSpecFromGps(gps)]);
     dispatchSetup({ type: "PLACE_SUCCEEDED" });
   } catch (err) {
+    // Fully tear down a partially created anchor so a retry cannot accumulate
+    // overlapping markers / leaked frame-loop registrations. This covers the
+    // case where spawnAnchor succeeded but a later step (e.g. writeShowParam)
+    // threw, leaving `anchor` assigned while the FSM reverts to placeable.
+    anchor?.dispose();
+    anchor = null;
     dispatchSetup({
       type: "PLACE_FAILED",
       message: err instanceof Error ? err.message : "Failed to place anchor",

@@ -28,12 +28,22 @@
   - `placeAnchor()` (cache-miss): `PLACE_REQUESTED` (saving) →
     `spawnAnchor(gps, false)` + `writeShowParam([anchorSpecFromGps(gps)])`
     (encodes the anchor into the `?show=` URL via `history.replaceState`) →
-    `PLACE_SUCCEEDED`, or `PLACE_FAILED` on error (revert + error line).
+    `PLACE_SUCCEEDED`, or `PLACE_FAILED` on error (revert + error line). On
+    failure it also `dispose()`s + nulls any partially created `anchor`, so a
+    retry can never accumulate overlapping markers / leaked frame-loop
+    registrations.
     Note: this path is **synchronous** — `saving` → `saved` happen in one
     call stack, so the transient `Saving…` state is a view-model concern, not
     an observable painted frame.
   - `spawnAnchor()` builds `createGpsAnchor` with `getAlignmentMatrix` /
     `getGpsZeroRef` / `getCurrentGpsPoint` bound to the live store + last GPS.
+    It adds the marker to the AR world group *before* `createGpsAnchor`; if
+    creation throws it removes the marker again, and it wraps the returned
+    `dispose()` so disposing the anchor also detaches its marker (the
+    framework `dispose()` only unregisters the frame-loop tick — see
+    [gps-anchor](../../GpsPlusSlamJs_AppFramework/src/visualization/gps-anchor.ts.md)).
+    This makes `anchor.dispose()` a complete teardown for every caller
+    (placement retry, `failStart` boot rollback, `beforeunload`).
 - **Invariants & assumptions:**
   - Selectors are run via the `sel()` helper which casts the store state per
     selector (only the read slices exist at runtime — same pattern as the
@@ -47,4 +57,7 @@
   ([setup-state-machine](setup-state-machine.ts.md),
   [url-anchor-state](url-anchor-state.ts.md),
   [guidance-view](guidance-view.ts.md), [placement-view](placement-view.ts.md),
-  [capability](capability.ts.md), [marker](marker.ts.md)).
+  [capability](capability.ts.md), [marker](marker.ts.md)). The placement glue —
+  including the failure cleanup that prevents leaked / overlapping markers — is
+  covered end-to-end by the Tier 1 Playwright suite
+  (`playwright-tests/placement-flow.spec.js`).

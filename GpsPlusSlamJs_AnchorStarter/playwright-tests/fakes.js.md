@@ -30,6 +30,10 @@ copy-link) without real WebXR or GPS. See the plan
 - `gpsCallback` — the callback stashed by the faked `startGpsWatch`.
 - `markerCalls` — array of `MarkerOptions` captured on each
   `createAnchorMarker` call (used to assert the cache-hit decode).
+- `worldGroupChildren` — markers currently attached to the faked AR world
+  group. `spawnAnchor` adds a marker before creating the `GpsAnchor` and must
+  remove it again on any failure; specs assert this stays empty after a failed
+  placement (no orphaned mesh left to overlap a retry).
 - `trackingReport` — mutable; mutate to change the onboarding phase mid-test.
 - `failCreateAnchor` — set true to make the faked `createGpsAnchor` throw
   (placement-failure revert path).
@@ -39,8 +43,10 @@ copy-link) without real WebXR or GPS. See the plan
 ## Invariants & assumptions
 
 - The fakes are **duck-typed**: because `createGpsAnchor`/`createAnchorMarker`
-  are faked, the fake AR world-group (`{ add() {} }`), camera (`{}`) and marker
-  (`{}`) need no real THREE objects.
+  are faked, the fake AR world-group, camera (`{}`) and marker (`{}`) need no
+  real THREE objects. The world group implements `add`/`remove` over the shared
+  `worldGroupChildren` array (by object identity) so specs can assert markers
+  are removed on a failed placement.
 - `startGpsWatch`'s callback is stashed, not invoked — the spec pushes fixes on
   demand. The app's real GPS coordinator early-returns (no AR pose) but
   `main.ts` still records `lastGps`, which is all soft-gated placement needs.
