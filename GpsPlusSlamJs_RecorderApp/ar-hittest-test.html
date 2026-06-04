@@ -153,6 +153,24 @@
     </fieldset>
 
     <fieldset>
+      <legend>Per-frame camera usage (matches the production apps)</legend>
+      <label>
+        <input type="checkbox" id="opt-camera-texture-read" />
+        <span>
+          Each frame, read the live camera image via
+          <code>renderer.xr.getCameraTexture(view.camera)</code> &mdash; which
+          internally calls <code>XRWebGLBinding.getCameraImage()</code>. This is
+          what the production apps do every frame and what the plain reproducer
+          does <strong>not</strong>: requesting <code>camera-access</code> alone
+          never touches the camera image. Enable
+          <code>camera-access</code> above for this to have an effect. No reload
+          needed — it changes the render loop, not the session init.
+          <span id="camera-texture-read-status" style="color: #fcd34d"></span>
+        </span>
+      </label>
+    </fieldset>
+
+    <fieldset>
       <legend>Workarounds (page reloads on toggle)</legend>
       <label>
         <input type="checkbox" id="opt-projection-layer-workaround" />
@@ -278,6 +296,9 @@
       const optCameraAccess = document.getElementById('opt-camera-access');
       const optDomOverlay = document.getElementById('opt-dom-overlay');
       const optDepthSensing = document.getElementById('opt-depth-sensing');
+      const optCameraTextureRead = document.getElementById(
+        'opt-camera-texture-read'
+      );
       const optWorkaround = document.getElementById(
         'opt-projection-layer-workaround'
       );
@@ -286,6 +307,9 @@
       );
       const workaroundStatus = document.getElementById('workaround-status');
       const baseLayerStatus = document.getElementById('baselayer-status');
+      const cameraTextureReadStatus = document.getElementById(
+        'camera-texture-read-status'
+      );
 
       function log(msg, cls) {
         const stamp = new Date().toISOString().slice(11, 23);
@@ -347,6 +371,7 @@
           cameraAccess: optCameraAccess.checked,
           domOverlay: optDomOverlay.checked,
           depthSensing: optDepthSensing.checked,
+          cameraTextureRead: optCameraTextureRead.checked,
           workaround: optWorkaround.checked,
           baseLayerPersistence: optBaseLayer.checked,
         };
@@ -368,6 +393,7 @@
           optCameraAccess.checked = !!state.cameraAccess;
           optDomOverlay.checked = !!state.domOverlay;
           optDepthSensing.checked = !!state.depthSensing;
+          optCameraTextureRead.checked = !!state.cameraTextureRead;
           optWorkaround.checked = !!state.workaround;
           optBaseLayer.checked = !!state.baseLayerPersistence;
         } catch {
@@ -386,6 +412,26 @@
           updatePayloadPreview();
         });
       }
+
+      // Camera-texture read is a render-loop flag, not a session-init flag, so
+      // it does NOT reload the page. Toggling it takes effect on the next
+      // animation frame.
+      function updateCameraTextureReadStatus() {
+        if (!optCameraTextureRead.checked) {
+          cameraTextureReadStatus.textContent = '';
+        } else if (!optCameraAccess.checked) {
+          cameraTextureReadStatus.textContent =
+            ' — enable camera-access above for this to do anything';
+        } else {
+          cameraTextureReadStatus.textContent =
+            ' — will read the camera image each frame';
+        }
+      }
+      optCameraTextureRead.addEventListener('change', () => {
+        saveState();
+        updateCameraTextureReadStatus();
+      });
+      optCameraAccess.addEventListener('change', updateCameraTextureReadStatus);
 
       // Workaround toggle: save state then reload so the early `delete`
       // block at the top of the script can run with the new value before
@@ -416,6 +462,7 @@
           ? ' — applied this load'
           : ' — enabled but XRSession absent on this device';
       }
+      updateCameraTextureReadStatus();
 
       // Three.js scene setup — intentionally identical in shape to the upstream
       // webxr_ar_hittest.html example.
@@ -455,6 +502,54 @@
       let hitTestSourceRequested = false;
       let frameCount = 0;
       let lastFrameLogTime = 0;
+      // State for the per-frame camera-texture read (the production-app crash
+      // path the plain reproducer otherwise skips). Reset per session in
+      // rebuildArButton so each AR entry re-logs the grant status once.
+      let cameraReadLoggedGrant = false;
+      let cameraTextureNullCount = 0;
+
+      /**
+       * Mirror the production frame loop's camera usage. Three.js clears its
+       * per-frame camera-texture cache each animation frame and only calls
+       * `XRWebGLBinding.getCameraImage(view.camera)` lazily when the app calls
+       * `renderer.xr.getCameraTexture(view.camera)`. The plain reproducer
+       * REQUESTS `camera-access` but never calls it, so it never hits
+       * `getCameraImage` — the exact `camera_helper_` null-deref in
+       * crbug.com/507508099. The production apps DO call it every frame. This
+       * function reproduces that, so the page exercises the same crash surface.
+       */
+      function readCameraTextureForCrashRepro(frame, referenceSpace) {
+        const pose = frame.getViewerPose(referenceSpace);
+        if (!pose) return;
+        const view = pose.views[0];
+        const xrCamera = view && view.camera;
+        if (!xrCamera) {
+          if (!cameraReadLoggedGrant) {
+            cameraReadLoggedGrant = true;
+            log(
+              'camera-texture read: XRView.camera is undefined — camera-access not granted?',
+              'err'
+            );
+          }
+          return;
+        }
+        if (!cameraReadLoggedGrant) {
+          cameraReadLoggedGrant = true;
+          log(
+            `camera-texture read: XRView.camera ${xrCamera.width}x${xrCamera.height} — calling getCameraTexture()`,
+            'ok'
+          );
+        }
+        // This call triggers XRWebGLBinding.getCameraImage() inside three.js.
+        const texture = renderer.xr.getCameraTexture(xrCamera);
+        if (!texture && cameraTextureNullCount < 5) {
+          cameraTextureNullCount++;
+          log(
+            `getCameraTexture() returned null/undefined (${cameraTextureNullCount}/5)`,
+            'info'
+          );
+        }
+      }
 
       function animate(_timestamp, frame) {
         if (frame) {
@@ -498,6 +593,12 @@
               reticle.visible = false;
             }
           }
+
+          // Production-app camera usage: read the camera image every frame.
+          // Independent of hit-test so it can be bisected on its own.
+          if (optCameraTextureRead.checked && referenceSpace) {
+            readCameraTextureForCrashRepro(frame, referenceSpace);
+          }
         }
         renderer.render(scene, camera);
       }
@@ -521,6 +622,8 @@
         frameCount = 0;
         hitTestSource = null;
         hitTestSourceRequested = false;
+        cameraReadLoggedGrant = false;
+        cameraTextureNullCount = 0;
         const init = buildSessionInit();
         log(
           `creating ARButton with ${JSON.stringify(serializablePayload(init))}`,
