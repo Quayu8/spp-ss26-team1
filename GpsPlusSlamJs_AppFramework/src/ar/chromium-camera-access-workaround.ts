@@ -123,8 +123,10 @@ export function parseChromeVersion(userAgent: string): ChromeVersion | null {
 /** Lexicographically compare two version tuples: returns true if `a` > `b`. */
 function isVersionAfter(a: ChromeVersion, b: ChromeVersion): boolean {
   for (let i = 0; i < a.length; i++) {
-    if (a[i] !== b[i]) {
-      return a[i] > b[i];
+    const av = a[i] ?? 0;
+    const bv = b[i] ?? 0;
+    if (av !== bv) {
+      return av > bv;
     }
   }
   return false;
@@ -163,7 +165,7 @@ function patchUpdateRenderStateForBaseLayerPersistence(): boolean {
   const session = (globalThis as unknown as { XRSession?: XRSessionLike })
     .XRSession;
   const original = session?.prototype.updateRenderState;
-  if (typeof original !== 'function') {
+  if (!session || typeof original !== 'function') {
     return false;
   }
   if (
