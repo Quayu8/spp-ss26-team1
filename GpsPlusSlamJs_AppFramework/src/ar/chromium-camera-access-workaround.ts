@@ -20,13 +20,14 @@
  *
  *   - 147 : deleting `createProjectionLayer` / `layers` forces three.js onto
  *       `XRWebGLLayer` and sidesteps the crash (deletes-only is sufficient).
- *   - 148.x .. 149.0.7821 : the delete-only trick is NOT sufficient on its
- *       own. An ADDITIONAL patch is needed: persist the `baseLayer` reference
- *       across `XRSession.prototype.updateRenderState` so three.js's later
- *       `depthNear`/`depthFar` update does not drop the active `glBaseLayer`.
- *       (Confirmed on-device across the whole Chrome 148 line: BOTH the
+ *   - 148.0.7778.12 .. 149.0.7821 : the delete-only trick is NOT sufficient on
+ *       its own. An ADDITIONAL patch is needed: persist the `baseLayer`
+ *       reference across `XRSession.prototype.updateRenderState` so three.js's
+ *       later `depthNear`/`depthFar` update does not drop the active
+ *       `glBaseLayer`. (Confirmed on-device on `148.0.7778.215`: BOTH the
  *       deletes and the baseLayer patch are required for the page not to
- *       crash, regardless of the exact 148 patch level.)
+ *       crash. Earlier 148 builds (`< .7778.12`) are below the window per the
+ *       tracker, which reported delete-only worked there.)
  *   - > 149.0.7821 (incl. Chrome 150) : the delete-only path is STILL required
  *       (confirmed on-device: Chrome 150 only stops crashing when the deletes
  *       are applied), but the extra baseLayer-persistence patch is NOT needed.
@@ -81,15 +82,14 @@ export type ChromeVersion = [number, number, number, number];
  * Inclusive lower bound of the Chrome window that additionally needs the
  * `baseLayer`-persistence patch (on top of the deletes).
  *
- * Set to the very first Chrome 148 build because on-device testing showed the
- * whole Chrome 148 line needs BOTH the projection-layer deletes AND the
- * baseLayer patch. (The issue tracker's `148.0.7778.12` figure — "delete-only
- * stopped working after this build" — implied earlier 148 builds were fine
- * with deletes alone, but real-device data overrode that: a 148 device broke
- * with deletes-only regardless of the exact patch level.) Chrome 147 and
- * earlier stay below this bound (deletes-only) per the documented timeline.
+ * Set to `148.0.7778.12`, the issue tracker's figure for when the delete-only
+ * trick stopped being sufficient. On-device confirmation: `148.0.7778.215`
+ * (well inside this window) crashes with deletes-only and needs BOTH patches.
+ * Earlier 148 builds (`< .7778.12`) and all of Chrome 147 stay below this
+ * bound (deletes-only) per the documented timeline — we have no on-device
+ * evidence that they need the baseLayer patch, so we do not apply it there.
  */
-export const BASELAYER_WINDOW_MIN: ChromeVersion = [148, 0, 0, 0];
+export const BASELAYER_WINDOW_MIN: ChromeVersion = [148, 0, 7778, 12];
 
 /**
  * Inclusive upper bound of the Chrome window that additionally needs the

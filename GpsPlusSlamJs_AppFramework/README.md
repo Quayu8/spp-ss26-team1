@@ -226,7 +226,7 @@ WebXR session lifecycle, Three.js renderer setup, image/depth capture, replay sc
 | `DepthSampler`                                 | Depth buffer sampling with configurable grids                                                                                                                                                                                                                               |
 | `CameraBlitCapture`                            | GPU blit-based camera capture                                                                                                                                                                                                                                               |
 | `initReplayScene(container)`                   | Create a 3D replay scene with orbit/FPS controls                                                                                                                                                                                                                            |
-| `applyChromiumProjectionLayerWorkaround`       | Chromium camera-access tab-crash workaround. Always deletes projection-layer hooks (forces `XRWebGLLayer`; required on every affected build incl. Chrome 150) and additionally persists `baseLayer` only on the affected Chrome window (all of Chrome 148 up to 149.0.7821) |
+| `applyChromiumProjectionLayerWorkaround`       | Chromium camera-access tab-crash workaround. Always deletes projection-layer hooks (forces `XRWebGLLayer`; required on every affected build incl. Chrome 150) and additionally persists `baseLayer` only on the affected Chrome window (148.0.7778.12 up to 149.0.7821) |
 
 ### `sensors/` — GPS & Permissions
 

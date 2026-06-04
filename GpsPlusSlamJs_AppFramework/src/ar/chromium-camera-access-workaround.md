@@ -22,11 +22,11 @@ bootstrap, before any `requestSession()`.
   baseLayer window (inclusive bounds). False for non-Chromium UAs.
 - `parseChromeVersion(userAgent: string): ChromeVersion | null` — parses
   `Chrome/` or `CriOS/` four-part versions.
-- `BASELAYER_WINDOW_MIN = [148, 0, 0, 0]`,
+- `BASELAYER_WINDOW_MIN = [148, 0, 7778, 12]`,
   `BASELAYER_WINDOW_MAX = [149, 0, 7821, 0]` — inclusive bounds of the window
-  that additionally needs the baseLayer patch. The lower bound covers the
-  entire Chrome 148 line (on-device, the whole 148 line needs both
-  workarounds; e.g. `148.0.7778.215`).
+  that additionally needs the baseLayer patch. The lower bound is the tracker's
+  `148.0.7778.12` figure; on-device, `148.0.7778.215` (inside the window) needs
+  both workarounds.
 - Types: `ChromeVersion`, `ChromiumProjectionLayerWorkaroundResult`
   (`deletedCreateProjectionLayer`, `deletedRenderStateLayers`,
   `patchedUpdateRenderState`, `detectedChromeVersion`).

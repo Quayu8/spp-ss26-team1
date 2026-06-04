@@ -126,18 +126,19 @@ describe('needsBaseLayerPersistence', () => {
     expect(needsBaseLayerPersistence(UA_AFFECTED_148)).toBe(true);
   });
 
-  it('returns true for an EARLY Chrome 148 build (regression: whole 148 line needs both)', () => {
-    // Why this matters: a device on an early 148.0.7778.x build broke when the
-    // app applied deletes-only. The window must cover the entire 148 line, not
-    // just builds at/after the tracker's 148.0.7778.12 figure.
+  it('returns false for an EARLY Chrome 148 build below the window minimum', () => {
+    // Why this matters: the window lower bound is the tracker's 148.0.7778.12
+    // figure (delete-only stopped working after it). Builds below that — e.g.
+    // 148.0.7778.5 or 148.0.0.0 — are NOT in the window; we have no on-device
+    // evidence they need the baseLayer patch, so the predicate must be false.
     expect(
       needsBaseLayerPersistence(
         'Mozilla/5.0 (Linux; Android 14) Chrome/148.0.7778.5 Mobile Safari/537.36'
       )
-    ).toBe(true);
+    ).toBe(false);
     expect(
       needsBaseLayerPersistence('Chrome/148.0.0.0 Mobile Safari/537.36')
-    ).toBe(true);
+    ).toBe(false);
   });
 
   it('returns false for Chrome 150 (above the window — deletes only)', () => {
@@ -155,9 +156,17 @@ describe('needsBaseLayerPersistence', () => {
 
   it('excludes the highest Chrome 147 build (just below the window)', () => {
     // 147.x is delete-only per the documented timeline; even a very high 147
-    // patch must stay below BASELAYER_WINDOW_MIN = 148.0.0.0.
+    // patch must stay below BASELAYER_WINDOW_MIN = 148.0.7778.12.
     expect(
       needsBaseLayerPersistence('Chrome/147.0.9999.999 Mobile Safari/537.36')
+    ).toBe(false);
+  });
+
+  it('excludes one patch below the window minimum', () => {
+    // Guards the lower boundary: 148.0.7778.11 is one patch below
+    // BASELAYER_WINDOW_MIN (148.0.7778.12) and must be delete-only.
+    expect(
+      needsBaseLayerPersistence('Chrome/148.0.7778.11 Mobile Safari/537.36')
     ).toBe(false);
   });
 
