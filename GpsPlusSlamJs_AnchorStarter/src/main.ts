@@ -31,6 +31,7 @@ import {
   selectZeroReference,
 } from "gps-plus-slam-app-framework/state";
 import { NullStorageBackend } from "gps-plus-slam-app-framework/storage";
+import { applyChromiumProjectionLayerWorkaround } from "gps-plus-slam-app-framework/ar/chromium-camera-access-workaround";
 import {
   getCurrentArPose,
   setTrackingStore,
@@ -427,6 +428,11 @@ async function startAr(): Promise<void> {
 // ---------------------------------------------------------------------------
 
 async function main(): Promise<void> {
+  // Apply the Chromium WebXR camera-access tab-crash workaround before any
+  // session setup. It is version-aware (a no-op on patched Chrome and on
+  // non-affected environments), so calling it unconditionally here is safe.
+  applyChromiumProjectionLayerWorkaround();
+
   render();
 
   const seams = getSeams();

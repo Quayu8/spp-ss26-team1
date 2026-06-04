@@ -21,6 +21,7 @@
  *    NOT the GPS-aligned scene root. The reticle below follows this rule.
  */
 import {
+  applyChromiumProjectionLayerWorkaround,
   createEnableGpsArController,
   getArWorldGroup,
   getCamera,
@@ -172,6 +173,11 @@ function toGpsSeed(position: GpsPosition): LatLong | LatLongAlt {
 }
 
 function main(): void {
+  // Apply the Chromium WebXR camera-access tab-crash workaround before any
+  // session setup. It is version-aware (a no-op on patched Chrome and on
+  // non-affected environments), so calling it unconditionally here is safe.
+  applyChromiumProjectionLayerWorkaround();
+
   const statusEl = getElement<HTMLPreElement>('status');
   const button = getElement<HTMLButtonElement>('enter-ar');
   const arRoot = getElement<HTMLDivElement>('ar-root');

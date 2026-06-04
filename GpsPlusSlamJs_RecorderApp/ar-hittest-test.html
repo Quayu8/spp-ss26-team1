@@ -199,6 +199,15 @@
       // enabled. Must run before three.js touches any WebXR API. Reading
       // sessionStorage and deleting the prototype members is synchronous,
       // so doing it before the dynamic imports below is sufficient.
+      //
+      // NOTE: this is an intentional standalone copy of the production helper
+      // gps-plus-slam-app-framework/ar/chromium-camera-access-workaround.ts.
+      // It is deliberately NOT reused here: the production helper is
+      // version-gated (it no-ops on patched Chrome > 149.0.7821), but this
+      // diagnostic page must be able to force the workaround ON/OFF on ANY
+      // Chrome build — including a patched one — to bisect on-device. The
+      // logic below (delete + baseLayer-persistence merge order) mirrors the
+      // helper; keep them in sync when the helper changes.
       let workaroundApplied = {
         createProjectionLayer: false,
         layers: false,
