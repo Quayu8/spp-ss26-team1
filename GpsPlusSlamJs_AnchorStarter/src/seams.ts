@@ -20,6 +20,7 @@
  */
 
 import { selectTrackingQuality } from "gps-plus-slam-app-framework/state";
+import { selectAlignmentMatrix } from "gps-plus-slam-app-framework/state";
 import {
   initAR,
   getArWorldGroup,
@@ -40,6 +41,7 @@ import {
 } from "gps-plus-slam-app-framework/visualization";
 
 import { createAnchorMarker } from "./marker.js";
+import { startReticleHitTest } from "./reticle-hit-test.js";
 
 /** The framework/marker functions a Playwright e2e fake may override. */
 export interface AnchorStarterSeams {
@@ -54,6 +56,8 @@ export interface AnchorStarterSeams {
   createGpsAnchor: typeof createGpsAnchor;
   enableArWorldGroupAlignment: typeof enableArWorldGroupAlignment;
   selectTrackingQuality: typeof selectTrackingQuality;
+  selectAlignmentMatrix: typeof selectAlignmentMatrix;
+  startReticleHitTest: typeof startReticleHitTest;
   createAnchorMarker: typeof createAnchorMarker;
 }
 
@@ -77,6 +81,8 @@ export const realSeams: AnchorStarterSeams = {
   createGpsAnchor,
   enableArWorldGroupAlignment,
   selectTrackingQuality,
+  selectAlignmentMatrix,
+  startReticleHitTest,
   createAnchorMarker,
 };
 

@@ -153,6 +153,61 @@ test.describe("Anchor starter — Tier 1 placement flow", () => {
     });
   });
 
+  test("blocks placement with the point-at-the-ground hint when no surface is under the reticle", async ({
+    page,
+  }) => {
+    // The anchor is placed under the hit-test reticle (the AR cursor), so a
+    // press with no surface must NOT place — it surfaces the hint and the
+    // button stays placeable for a retry once the user points at the ground.
+    await bootAnchorStarter(page);
+    await pushGpsFix(page, SAMPLE_FIX);
+
+    await page.evaluate(() => {
+      window.__anchorStarterTest.reticleVisible = false;
+    });
+    await page.getByTestId("place-button").click();
+
+    // Hint surfaced; nothing saved; button still placeable.
+    const error = page.getByTestId("error");
+    await expect(error).toBeVisible();
+    await expect(error).toContainText("Point your phone at the ground");
+    const placeButton = page.getByTestId("place-button");
+    await expect(placeButton).toHaveText("Place anchor");
+    await expect(placeButton).toBeEnabled();
+    await expect(page.getByTestId("copy-link-button")).toBeHidden();
+    const search = await page.evaluate(() => location.search);
+    expect(search).not.toMatch(/[?&]show=/);
+
+    // Pointing at the ground (reticle visible) then retrying places normally.
+    await page.evaluate(() => {
+      window.__anchorStarterTest.reticleVisible = true;
+    });
+    await page.getByTestId("place-button").click();
+    await expect(placeButton).toHaveText("Saved ✓");
+  });
+
+  test("blocks placement with the alignment hint when GPS alignment has not arrived", async ({
+    page,
+  }) => {
+    // A surface is under the cursor but alignment is still null → the reticle's
+    // world pose is not yet GPS-world, so placement must wait and surface the
+    // alignment hint rather than committing the anchor to a meaningless GPS.
+    await bootAnchorStarter(page);
+    await pushGpsFix(page, SAMPLE_FIX);
+
+    await page.evaluate(() => {
+      window.__anchorStarterTest.alignmentMatrix = null;
+    });
+    await page.getByTestId("place-button").click();
+
+    const error = page.getByTestId("error");
+    await expect(error).toBeVisible();
+    await expect(error).toContainText("Aligning to GPS");
+    await expect(page.getByTestId("place-button")).toHaveText("Place anchor");
+    const search = await page.evaluate(() => location.search);
+    expect(search).not.toMatch(/[?&]show=/);
+  });
+
   test("reverts and surfaces an error when anchor creation fails", async ({
     page,
   }) => {

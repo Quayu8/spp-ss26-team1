@@ -74,6 +74,23 @@ export async function installAnchorStarterFakes(page, options = {}) {
       trackingReport: cfg.trackingReport,
       /** When true, the faked `createGpsAnchor` throws (placement failure). */
       failCreateAnchor: false,
+      /**
+       * Whether the faked hit-test reticle currently reports a surface under
+       * the screen centre. Defaults to `true` so the existing placement specs
+       * (which don't care about the reticle) keep placing; the no-surface spec
+       * flips it to exercise the "point at the ground" gate.
+       */
+      reticleVisible: true,
+      /** Faked reticle world position handed to `getWorldPosition(out)`. */
+      reticleWorldPosition: { x: 1, y: 0, z: -2 },
+      /** Set true once the faked reticle handle is disposed. */
+      reticleDisposed: false,
+      /**
+       * Current GPS alignment the faked `selectAlignmentMatrix` returns.
+       * Non-null by default (a desktop browser never computes a real one), so
+       * the placement gate passes; the no-alignment spec sets it to `null`.
+       */
+      alignmentMatrix: [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1],
     };
 
     /** Drive a GPS fix through the stashed watch callback. */
@@ -128,6 +145,21 @@ export async function installAnchorStarterFakes(page, options = {}) {
         return { dispose() {} };
       },
       selectTrackingQuality: () => control.trackingReport,
+      selectAlignmentMatrix: () => control.alignmentMatrix,
+      startReticleHitTest: () => ({
+        isVisible: () => control.reticleVisible,
+        getWorldPosition: (out) => {
+          const p = control.reticleWorldPosition;
+          if (out && typeof out.set === "function") {
+            out.set(p.x, p.y, p.z);
+            return out;
+          }
+          return p;
+        },
+        dispose: () => {
+          control.reticleDisposed = true;
+        },
+      }),
       createAnchorMarker: (markerOptions) => {
         control.markerCalls.push(markerOptions ?? {});
         return {};

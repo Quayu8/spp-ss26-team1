@@ -24,11 +24,15 @@ import type { AnchorStarterSeams } from "./seams.js";
  */
 vi.mock("gps-plus-slam-app-framework/state", () => ({
   selectTrackingQuality: () => null,
+  selectAlignmentMatrix: () => null,
 }));
 vi.mock("gps-plus-slam-app-framework/ar/webxr-session", () => ({
   initAR: () => Promise.resolve(),
   getArWorldGroup: () => null,
   getCamera: () => null,
+}));
+vi.mock("gps-plus-slam-app-framework/ar/xr-frame-loop", () => ({
+  registerXrFrameUpdate: () => () => undefined,
 }));
 vi.mock("gps-plus-slam-app-framework/sensors", () => ({
   startGpsWatch: () => undefined,
@@ -40,6 +44,8 @@ vi.mock("gps-plus-slam-app-framework/sensors", () => ({
 vi.mock("gps-plus-slam-app-framework/visualization", () => ({
   createGpsAnchor: () => ({ dispose: () => undefined }),
   enableArWorldGroupAlignment: () => ({ dispose: () => undefined }),
+  createReticleMesh: () => ({ visible: false }),
+  updateReticle: () => undefined,
 }));
 
 const { getSeams, realSeams } = await import("./seams.js");

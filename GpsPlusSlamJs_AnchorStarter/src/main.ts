@@ -27,7 +27,6 @@ import {
   updateDeviceOrientation,
   startSession,
   computeOnboardingGuidance,
-  selectAlignmentMatrix,
   selectZeroReference,
 } from "gps-plus-slam-app-framework/state";
 import { NullStorageBackend } from "gps-plus-slam-app-framework/storage";
@@ -60,6 +59,8 @@ import { toGuidanceView } from "./guidance-view.js";
 import { toPlacementView } from "./placement-view.js";
 import { isFullySupported, capabilityMessage } from "./capability.js";
 import { getSeams } from "./seams.js";
+import { decideAnchorPlacement } from "./placement-decision.js";
+import { type ReticleHandle } from "./reticle-hit-test.js";
 // --- your content here -----------------------------------------------------
 import { type MarkerOptions } from "./marker.js";
 // ---------------------------------------------------------------------------
@@ -100,6 +101,7 @@ type AppStore = ReturnType<typeof createSlamAppStore>;
 let store: AppStore | null = null;
 let setupState: SetupState = initialSetupState;
 let anchor: GpsAnchor | null = null;
+let reticleHandle: ReticleHandle | null = null;
 let lastGps: LatLongAlt | null = null;
 let lastTrackingReady = false;
 
@@ -123,6 +125,19 @@ function toLatLongAlt(pos: GpsPosition): LatLongAlt {
   return typeof pos.altitude === "number" && Number.isFinite(pos.altitude)
     ? { lat: pos.lat, lon: pos.lon, altitude: pos.altitude }
     : { lat: pos.lat, lon: pos.lon, altitude: 0 };
+}
+
+/**
+ * Current GPS alignment matrix, or null when no store/alignment exists yet.
+ * Read through the seam so the e2e fake can drive the alignment gate (the real
+ * alignment is computed from GPS + AR pose, neither of which exists in a desktop
+ * Playwright browser).
+ */
+function currentAlignment(): ReturnType<
+  ReturnType<typeof getSeams>["selectAlignmentMatrix"]
+> {
+  if (!store) return null;
+  return sel(getSeams().selectAlignmentMatrix);
 }
 
 // ---------------------------------------------------------------------------
@@ -210,7 +225,7 @@ function spawnAnchor(
       camera,
       gpsPoint,
       skipBootstrap,
-      getAlignmentMatrix: () => sel(selectAlignmentMatrix),
+      getAlignmentMatrix: () => sel(getSeams().selectAlignmentMatrix),
       getGpsZeroRef: (): LatLong | null => sel(selectZeroReference),
       getCurrentGpsPoint: () => lastGps,
     });
@@ -232,7 +247,7 @@ function spawnAnchor(
   if (options.hideUntilAligned) {
     marker.visible = false;
     const revealWhenAligned = (): void => {
-      if (sel(selectAlignmentMatrix) === null) return;
+      if (sel(getSeams().selectAlignmentMatrix) === null) return;
       marker.visible = true;
       unsubReveal?.();
       unsubReveal = null;
@@ -324,6 +339,18 @@ async function copyShareLink(): Promise<void> {
 
 function placeAnchor(): void {
   if (!canPlaceAnchor(setupState)) return;
+  // Surface/alignment gate (mirrors MinimalExample's decideTapPlacement): the
+  // anchor is placed under the hit-test reticle, so a press only commits when a
+  // surface is under the cursor AND a GPS alignment exists. Otherwise surface
+  // the matching hint and no-op (the FSM stays placeable — no `saving`).
+  const decision = decideAnchorPlacement({
+    reticleVisible: reticleHandle?.isVisible() ?? false,
+    hasAlignment: currentAlignment() !== null,
+  });
+  if (decision.kind === "blocked") {
+    dispatchSetup({ type: "PLACE_BLOCKED", message: decision.hint });
+    return;
+  }
   dispatchSetup({ type: "PLACE_REQUESTED" });
   try {
     const gps = lastGps;
@@ -332,6 +359,11 @@ function placeAnchor(): void {
     anchor = spawnAnchor(gps, false);
     writeShowParam([anchorSpecFromGps(gps)]);
     dispatchSetup({ type: "PLACE_SUCCEEDED" });
+    // The placement is committed; the reticle has done its job. Remove it so the
+    // ring does not linger over the saved anchor (idempotent — safe to call
+    // again on beforeunload).
+    reticleHandle?.dispose();
+    reticleHandle = null;
   } catch (err) {
     // Fully tear down a partially created anchor so a retry cannot accumulate
     // overlapping markers / leaked frame-loop registrations. This covers the
@@ -364,6 +396,8 @@ function failStart(err: unknown, fallbackMessage: string): void {
   stopOrientationWatch();
   anchor?.dispose();
   anchor = null;
+  reticleHandle?.dispose();
+  reticleHandle = null;
 
   dom.startScreen.hidden = false;
   dom.guidance.hidden = true;
@@ -388,16 +422,22 @@ async function startAr(): Promise<void> {
 
   const appContainer = el("app");
   try {
-    // This example only places 3D anchors under a reticle — it never reads the
-    // camera image or depth. Turn off the camera/depth crash-surface features
-    // (which default to `true`) so the session doesn't request `camera-access`
-    // or `depth-sensing` or acquire the camera texture each frame. `dom-overlay`
-    // and the CSS3D renderer stay on so the overlay UI still composites in AR.
-    await getSeams().initAR(appContainer, {
-      enableCameraAccess: false,
-      enableDepthSensingFeature: false,
-      enableCameraTextureAcquisition: false,
-    });
+    // This example places its anchor under a screen-centre hit-test reticle —
+    // it never reads the camera image or depth. Turn off the camera/depth
+    // crash-surface features (which default to `true`) so the session doesn't
+    // request `camera-access` or `depth-sensing` or acquire the camera texture
+    // each frame, but DO request `hit-test` so the cache-miss reticle works.
+    // `dom-overlay` and the CSS3D renderer stay on so the overlay UI still
+    // composites in AR.
+    await getSeams().initAR(
+      appContainer,
+      {
+        enableCameraAccess: false,
+        enableDepthSensingFeature: false,
+        enableCameraTextureAcquisition: false,
+      },
+      { requestHitTest: true },
+    );
   } catch (err) {
     failStart(err, "Failed to start the AR session.");
     return;
@@ -468,6 +508,16 @@ async function startAr(): Promise<void> {
         },
         { hideUntilAligned: true },
       );
+    } else {
+      // cache-miss: drive a screen-centre hit-test reticle so the user places
+      // the anchor under the AR cursor (the "ground spot" they point at), not
+      // at their own position. Parented under `arWorldGroup` so the reticle
+      // rides the GPS alignment and its world pose is GPS-world (NUE).
+      if (alignmentArWorldGroup) {
+        reticleHandle = getSeams().startReticleHitTest({
+          arWorldGroup: alignmentArWorldGroup,
+        });
+      }
     }
     dispatchSetup({ type: "BOOTED", hasCachedAnchor: cached !== null });
     render();
@@ -526,6 +576,7 @@ async function main(): Promise<void> {
 window.addEventListener("beforeunload", () => {
   stopGpsWatch();
   anchor?.dispose();
+  reticleHandle?.dispose();
 });
 
 void main();
