@@ -94,6 +94,27 @@ function isObjectInAnchoredChain(object: THREE.Object3D): boolean {
   return false;
 }
 
+/**
+ * Returns true iff `object` is `arWorldGroup` itself or a descendant of it.
+ * The anchor's `object3D` MUST satisfy this: only then does it ride the
+ * alignment applied to `arWorldGroup.matrix` (the node the camera also lives
+ * under) via scene-graph propagation. An anchor parented to the scene root
+ * instead never receives the alignment, so each steady-state re-registration
+ * snaps the full alignment delta and the object visibly slides as the user
+ * moves — the exact instability the anchor exists to prevent.
+ */
+function isDescendantOf(
+  object: THREE.Object3D,
+  arWorldGroup: THREE.Object3D
+): boolean {
+  let cursor: THREE.Object3D | null = object;
+  while (cursor) {
+    if (cursor === arWorldGroup) return true;
+    cursor = cursor.parent;
+  }
+  return false;
+}
+
 function median(values: number[]): number {
   const sorted = [...values].sort((a, b) => a - b);
   const mid = Math.floor(sorted.length / 2);
@@ -122,6 +143,13 @@ export function createGpsAnchor(options: GpsAnchorOptions): GpsAnchor {
     throw new Error(
       'createGpsAnchor: nested GpsAnchors are not supported — ' +
         'the supplied object3D is already inside an anchored parent chain.'
+    );
+  }
+  if (!isDescendantOf(options.object3D, options.arWorldGroup)) {
+    throw new Error(
+      'createGpsAnchor: object3D must be a descendant of arWorldGroup ' +
+        '(the alignment-bearing node the camera lives under); parenting an ' +
+        'anchor to the scene root defeats AR stability.'
     );
   }
   anchoredObjects.add(options.object3D);

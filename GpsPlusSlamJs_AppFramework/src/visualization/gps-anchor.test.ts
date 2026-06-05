@@ -287,6 +287,76 @@ describe('createGpsAnchor — bootstrap', () => {
     ).toThrow(/nested/i);
     parentAnchor.dispose();
   });
+
+  it('throws when object3D is not a descendant of the passed arWorldGroup (scene-root mistake)', () => {
+    // Why this test matters: a GPS anchor only stays stable in the AR view
+    // when its object3D rides the alignment-bearing `arWorldGroup` (the node
+    // the camera also lives under). Parenting it to the scene root instead
+    // means the alignment is never applied to it via scene-graph propagation,
+    // so each steady-state re-registration snaps the FULL alignment delta and
+    // the object visibly slides as the user moves. The framework must make
+    // this mistake impossible rather than silently "working".
+    const scene = new THREE.Scene();
+    const arWorldGroup = new THREE.Group();
+    const camera = new THREE.PerspectiveCamera();
+    scene.add(arWorldGroup);
+    // object3D is parented to the scene root, NOT under arWorldGroup.
+    const sceneRootObject = new THREE.Object3D();
+    scene.add(sceneRootObject);
+    expect(() =>
+      createGpsAnchor({
+        arWorldGroup,
+        object3D: sceneRootObject,
+        camera,
+        gpsPoint: { lat: 48.0, lon: 11.0 },
+        getAlignmentMatrix: () => null,
+        getGpsZeroRef: () => ({ lat: 48.0, lon: 11.0 }),
+        getCurrentGpsPoint: () => null,
+      })
+    ).toThrow(/descendant of arWorldGroup/i);
+  });
+
+  it('throws when object3D is detached (no parent chain reaching arWorldGroup)', () => {
+    // A freshly-created object that was never added to arWorldGroup is the
+    // degenerate case of the scene-root mistake — it can never ride the
+    // alignment. Reject it at construction time.
+    const arWorldGroup = new THREE.Group();
+    const camera = new THREE.PerspectiveCamera();
+    const detached = new THREE.Object3D();
+    expect(() =>
+      createGpsAnchor({
+        arWorldGroup,
+        object3D: detached,
+        camera,
+        gpsPoint: { lat: 48.0, lon: 11.0 },
+        getAlignmentMatrix: () => null,
+        getGpsZeroRef: () => ({ lat: 48.0, lon: 11.0 }),
+        getCurrentGpsPoint: () => null,
+      })
+    ).toThrow(/descendant of arWorldGroup/i);
+  });
+
+  it('accepts an object nested several levels deep under arWorldGroup', () => {
+    // The guard must walk the full parent chain, not just check the direct
+    // parent — apps legitimately nest content under intermediate groups.
+    const arWorldGroup = new THREE.Group();
+    const camera = new THREE.PerspectiveCamera();
+    const intermediate = new THREE.Group();
+    const leaf = new THREE.Object3D();
+    arWorldGroup.add(intermediate);
+    intermediate.add(leaf);
+    const anchor = createGpsAnchor({
+      arWorldGroup,
+      object3D: leaf,
+      camera,
+      gpsPoint: { lat: 48.0, lon: 11.0 },
+      getAlignmentMatrix: () => null,
+      getGpsZeroRef: () => ({ lat: 48.0, lon: 11.0 }),
+      getCurrentGpsPoint: () => null,
+    });
+    expect(anchor.phase).toBe('bootstrap');
+    anchor.dispose();
+  });
 });
 
 /**
