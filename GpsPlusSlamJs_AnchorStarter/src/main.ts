@@ -191,6 +191,7 @@ function spawnAnchor(
   gpsPoint: LatLong | LatLongAlt,
   skipBootstrap: boolean,
   markerOptions: MarkerOptions = {},
+  options: { hideUntilAligned?: boolean } = {},
 ): GpsAnchor {
   const seams = getSeams();
   const arWorldGroup = seams.getArWorldGroup();
@@ -221,6 +222,29 @@ function spawnAnchor(
     throw err;
   }
 
+  // Q4 — deferred reveal for the `?show=` reload (cache-hit) path. A
+  // skipBootstrap anchor sits at the AR origin (local 0,0,0) until its first
+  // steady-state commit, which cannot happen until an alignment exists. Showing
+  // the marker before then would flash it at the origin and then jump it to its
+  // real pose. Keep it hidden until the first non-null alignment arrives, then
+  // reveal it where the anchor has by-then placed it.
+  let unsubReveal: (() => void) | null = null;
+  if (options.hideUntilAligned) {
+    marker.visible = false;
+    const revealWhenAligned = (): void => {
+      if (sel(selectAlignmentMatrix) === null) return;
+      marker.visible = true;
+      unsubReveal?.();
+      unsubReveal = null;
+    };
+    // Alignment may already be present (e.g. a fast re-localise); check once,
+    // and otherwise reveal on the first store change that produces one.
+    revealWhenAligned();
+    if (!marker.visible && store) {
+      unsubReveal = store.subscribe(revealWhenAligned);
+    }
+  }
+
   // The framework's `dispose()` only unregisters the anchor from the frame
   // loop; it deliberately does NOT detach the marker from the scene graph
   // (see gps-anchor.ts). Wrap it so disposing the anchor also removes its
@@ -229,6 +253,7 @@ function spawnAnchor(
   const disposeAnchor = gpsAnchor.dispose.bind(gpsAnchor);
   gpsAnchor.dispose = (): void => {
     disposeAnchor();
+    unsubReveal?.();
     arWorldGroup.remove(marker);
   };
   return gpsAnchor;
@@ -391,6 +416,18 @@ async function startAr(): Promise<void> {
       }),
     );
 
+    // GPS-register the AR view: lerp the store's alignment onto arWorldGroup so
+    // the camera and the anchored marker ride the alignment together. Without
+    // this the camera is pure-VIO and the anchor must absorb the full alignment
+    // delta on every off-screen re-registration.
+    const alignmentArWorldGroup = getSeams().getArWorldGroup();
+    if (alignmentArWorldGroup) {
+      getSeams().enableArWorldGroupAlignment({
+        store,
+        arWorldGroup: alignmentArWorldGroup,
+      });
+    }
+
     // GPS → store (+ remember the latest fix for the anchor's
     // getCurrentGpsPoint).
     const gpsHandler = createGpsPositionHandler({
@@ -417,13 +454,20 @@ async function startAr(): Promise<void> {
     if (cached) {
       // cache-hit: seed from the URL-decoded GPS and let it re-converge as
       // alignment settles (skipBootstrap — no live median accumulation), then
-      // reveal the marker in its requested `ui` style.
+      // reveal the marker in its requested `ui` style. `hideUntilAligned` keeps
+      // the marker hidden until the first alignment arrives so it never flashes
+      // at the AR origin before jumping to its real pose (Q4).
       lastGps = { lat: cached.lat, lon: cached.lon, altitude: cached.alt };
-      anchor = spawnAnchor(lastGps, true, {
-        ui: cached.ui,
-        scale: cached.scale,
-        rotationDeg: cached.rotationDeg,
-      });
+      anchor = spawnAnchor(
+        lastGps,
+        true,
+        {
+          ui: cached.ui,
+          scale: cached.scale,
+          rotationDeg: cached.rotationDeg,
+        },
+        { hideUntilAligned: true },
+      );
     }
     dispatchSetup({ type: "BOOTED", hasCachedAnchor: cached !== null });
     render();

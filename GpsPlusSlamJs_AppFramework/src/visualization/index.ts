@@ -44,7 +44,7 @@ export {
 } from './frustum-visibility.js';
 
 // --- frame-conversions ---
-export { nueToArLocal } from './frame-conversions.js';
+export { nueToArLocal, worldNueToGps } from './frame-conversions.js';
 
 // --- gps-anchor ---
 export {

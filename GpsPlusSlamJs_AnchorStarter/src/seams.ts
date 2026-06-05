@@ -34,7 +34,10 @@ import {
   checkWebXRSupport,
   checkGeolocationPermission,
 } from "gps-plus-slam-app-framework/sensors";
-import { createGpsAnchor } from "gps-plus-slam-app-framework/visualization";
+import {
+  createGpsAnchor,
+  enableArWorldGroupAlignment,
+} from "gps-plus-slam-app-framework/visualization";
 
 import { createAnchorMarker } from "./marker.js";
 
@@ -49,6 +52,7 @@ export interface AnchorStarterSeams {
   startOrientationWatch: typeof startOrientationWatch;
   requestDeviceOrientationPermission: typeof requestDeviceOrientationPermission;
   createGpsAnchor: typeof createGpsAnchor;
+  enableArWorldGroupAlignment: typeof enableArWorldGroupAlignment;
   selectTrackingQuality: typeof selectTrackingQuality;
   createAnchorMarker: typeof createAnchorMarker;
 }
@@ -71,6 +75,7 @@ export const realSeams: AnchorStarterSeams = {
   startOrientationWatch,
   requestDeviceOrientationPermission,
   createGpsAnchor,
+  enableArWorldGroupAlignment,
   selectTrackingQuality,
   createAnchorMarker,
 };

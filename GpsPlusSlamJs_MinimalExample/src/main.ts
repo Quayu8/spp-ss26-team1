@@ -38,13 +38,18 @@ import {
   selectZeroReference,
   startSession,
   updateDeviceOrientation,
+  type SubscribableStore,
 } from 'gps-plus-slam-app-framework/state';
 import { NullStorageBackend } from 'gps-plus-slam-app-framework/storage';
 import type {
   GpsPosition,
   RawDeviceOrientation,
 } from 'gps-plus-slam-app-framework/sensors';
-import { createGpsAnchor } from 'gps-plus-slam-app-framework/visualization';
+import {
+  createGpsAnchor,
+  enableArWorldGroupAlignment,
+  worldNueToGps,
+} from 'gps-plus-slam-app-framework/visualization';
 import type { LatLong, LatLongAlt } from 'gps-plus-slam-app-framework/core';
 import { Vector3 } from 'three';
 
@@ -234,10 +239,16 @@ function main(): void {
     const { anchorObject } = coSpawnAtWorldPose({ scene, arWorldGroup, worldPosition });
 
     // Default bootstrap (NO skipBootstrap): the anchor holds the tapped pose
-    // while sampling GPS, then makes its first lazy correction off-screen.
-    // Each framework selector is typed against a slightly different internal
-    // root shape; only the slices it reads exist at runtime, so the cast through
-    // `unknown` is safe (same pattern as selectGpsPositions / AnchorStarter).
+    // while sampling its own GPS-world pose, then makes its first lazy
+    // correction off-screen. The bootstrap source is the OBJECT's world pose
+    // (where it was actually placed), converted to GPS via `worldNueToGps` —
+    // NOT the phone's GPS fix. This pins the anchor to the tapped point, not the
+    // device, and only works because `enableArWorldGroupAlignment` makes the
+    // object's world position GPS-world NUE. Each framework selector is typed
+    // against a slightly different internal root shape; only the slices it reads
+    // exist at runtime, so the cast through `unknown` is safe (same pattern as
+    // selectGpsPositions / AnchorStarter).
+    const sampleScratch = new Vector3();
     createGpsAnchor({
       object3D: anchorObject,
       arWorldGroup,
@@ -252,7 +263,17 @@ function main(): void {
         selectZeroReference(
           store.getState() as unknown as Parameters<typeof selectZeroReference>[0]
         ),
-      getCurrentGpsPoint: () => lastGps,
+      getCurrentGpsPoint: (): LatLongAlt | null => {
+        const zero = selectZeroReference(
+          store.getState() as unknown as Parameters<typeof selectZeroReference>[0]
+        );
+        const alignment = selectAlignmentMatrix(
+          store.getState() as unknown as Parameters<typeof selectAlignmentMatrix>[0]
+        );
+        // No GPS-world frame yet — skip this bootstrap tick (mirrors "no fix").
+        if (zero === null || alignment === null) return null;
+        return worldNueToGps(anchorObject.getWorldPosition(sampleScratch), zero);
+      },
     });
   }
 
@@ -270,6 +291,18 @@ function main(): void {
           startTime: Date.now(),
         })
       );
+      // GPS-register the AR view: lerp the store's alignment onto arWorldGroup
+      // so the camera and every anchored child ride the alignment together (the
+      // scene-root contrast cube deliberately does NOT, so it visibly slides).
+      // Without this the camera is pure-VIO and anchors must absorb the full
+      // alignment delta on each re-registration.
+      const arWorldGroup = getArWorldGroup();
+      if (arWorldGroup) {
+        enableArWorldGroupAlignment({
+          store: store as unknown as SubscribableStore,
+          arWorldGroup,
+        });
+      }
       startArInteraction({
         hasGpsFix: () => gpsFixCount > 0,
         onWaitingForGps: () => {
