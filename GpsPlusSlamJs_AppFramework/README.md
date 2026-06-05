@@ -208,6 +208,43 @@ A pure-function `syncGpsAnchoredMeshes` reconciler (option 1, bulk markers) is s
 
 > **Worked example.** The [`GpsPlusSlamJs_MinimalExample`](../GpsPlusSlamJs_MinimalExample/) ports the stock three.js `webxr_ar_hittest` example onto this convention and ends in a deliberate side-by-side **contrast demo**: a tap co-spawns an option-1 floater under `scene` and an option-3 `createGpsAnchor` marker under `arWorldGroup` at the same world pose, so the drift difference is visible. It is the canonical reference for options 1–3 and for the `registerXrFrameUpdate` + Enable-GPS-AR seams below.
 
+## DOM-Overlay / HUD stacking convention
+
+`initAR(container)` requests the WebXR **`dom-overlay`** feature with
+`domOverlay.root = container` — the **same element you pass in**. During an
+`immersive-ar` session the browser composites **only that element's subtree**
+over the camera feed; everything else on the page is hidden until the session
+ends.
+
+> **The rule:** every HUD / overlay / button you want visible **in AR** must be
+> a **DOM descendant of the element you pass to `initAR`**. A sibling overlay
+> works in the 2D pre-AR layout but silently disappears the moment AR starts —
+> a failure that only shows up on real AR hardware, never in a headless test.
+
+This is **not** a `z-index` problem; `z-index`/`pointer-events` only govern the
+2D (pre-AR) layout. Nesting is what determines in-AR visibility.
+
+```html
+<!-- ✅ Correct: HUD is inside the initAR container -->
+<div id="app">
+  <!-- three.js canvas is injected here by initAR -->
+  <div id="hud">…</div>
+</div>
+
+<!-- ❌ Wrong: HUD is a sibling — it vanishes once AR starts -->
+<div id="app"></div>
+<div id="hud">…</div>
+```
+
+```js
+await initAR(document.getElementById('app')!); // #app's subtree = the overlay root
+```
+
+A repo-meta guard (`tests/repo-config/hud-overlay-nesting.test.js`) asserts this
+structurally for every app's `index.html`, so a new app that authors its overlay
+as a sibling fails CI instead of failing silently in the field. Add new apps to
+that guard's `APP_OVERLAY_CONTRACTS` list.
+
 ## Modules
 
 ### `ar/` — WebXR & 3D Scene

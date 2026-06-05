@@ -60,9 +60,18 @@
     </style>
   </head>
   <body>
-    <div id="ar-root"></div>
-    <pre id="status" data-testid="status">loading…</pre>
-    <button id="enter-ar" type="button" disabled>Checking AR support…</button>
+    <!--
+      #status and #enter-ar MUST be descendants of #ar-root (the element passed
+      to initAR). Under the WebXR DOM Overlay feature only the initAR container's
+      subtree composites over the AR camera feed; a sibling overlay vanishes once
+      AR starts. See the repo-meta guard
+      tests/repo-config/hud-overlay-nesting.test.js and the AppFramework README
+      "DOM-Overlay / HUD stacking convention".
+    -->
+    <div id="ar-root">
+      <pre id="status" data-testid="status">loading…</pre>
+      <button id="enter-ar" type="button" disabled>Checking AR support…</button>
+    </div>
     <script type="module" src="/src/main.ts"></script>
   </body>
 </html>
