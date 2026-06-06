@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { Object3D } from 'three';
+import { Matrix4, Object3D, Vector3 } from 'three';
 
 import { createReticleMesh, updateReticle } from './hit-test-reticle.js';
 
@@ -52,5 +52,42 @@ describe('updateReticle', () => {
     updateReticle(reticle, pose);
     expect(reticle.visible).toBe(true);
     expect(reticle.matrix.elements[14]).toBe(7);
+  });
+
+  // Why this matters: the reticle is parented under arWorldGroup, whose matrix
+  // carries the GPS alignment (alignment × WEBXR_TO_NUE). The hit pose is in the
+  // WebXR reference space (the scene-root/world frame). If updateReticle wrote
+  // that world pose straight into the reticle's LOCAL matrix, the parent's
+  // alignment would double-apply and the reticle would drift off screen-centre
+  // (the bug reported on-device: up axis right, but it slides to the side as the
+  // alignment rotates). The reticle's resulting WORLD pose must equal the live
+  // hit pose regardless of the parent transform.
+  it("keeps the reticle's world pose equal to the hit pose under a transformed parent", () => {
+    // arWorldGroup carries a 90°-yaw + translation alignment (non-identity).
+    const arWorldGroup = new Object3D();
+    arWorldGroup.matrixAutoUpdate = false;
+    arWorldGroup.matrix
+      .makeRotationY(Math.PI / 2)
+      .setPosition(new Vector3(10, 20, 30));
+
+    const reticle = new Object3D();
+    reticle.matrixAutoUpdate = false;
+    arWorldGroup.add(reticle);
+
+    // A hit pose at world (1, 2, 3) under the screen centre.
+    const pose = [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 1, 2, 3, 1];
+    updateReticle(reticle, pose);
+
+    // Compose the reticle's world matrix the way three.js would during render.
+    const reticleWorld = new Matrix4().multiplyMatrices(
+      arWorldGroup.matrix,
+      reticle.matrix
+    );
+    const worldPosition = new Vector3().setFromMatrixPosition(reticleWorld);
+
+    expect(reticle.visible).toBe(true);
+    expect(worldPosition.x).toBeCloseTo(1, 6);
+    expect(worldPosition.y).toBeCloseTo(2, 6);
+    expect(worldPosition.z).toBeCloseTo(3, 6);
   });
 });

@@ -18,10 +18,21 @@
  * forgetting to hide the reticle when no surface is found, or letting Three.js
  * overwrite the matrix).
  */
-import { Mesh, MeshBasicMaterial, type Object3D, RingGeometry } from 'three';
+import {
+  Matrix4,
+  Mesh,
+  MeshBasicMaterial,
+  type Object3D,
+  RingGeometry,
+} from 'three';
 
 /** A column-major 4x4 transform, as produced by `XRPose.transform.matrix`. */
 export type HitMatrix = Float32Array | number[];
+
+// Per-frame scratch matrices reused across `updateReticle` calls to avoid
+// allocating a fresh `Matrix4` every animation frame.
+const hitPoseMatrix = /* @__PURE__ */ new Matrix4();
+const parentInverseWorldMatrix = /* @__PURE__ */ new Matrix4();
 
 /**
  * Build the reticle mesh: a thin ring oriented flat (rotated to lie in the
@@ -46,10 +57,20 @@ export function createReticleMesh(): Mesh {
 /**
  * Apply the latest hit-test pose to the reticle.
  *
- * - When `matrix` is a 16-element transform, the reticle adopts it verbatim and
- *   becomes visible.
+ * - When `matrix` is a 16-element transform, the reticle's **world** pose adopts
+ *   it and the reticle becomes visible.
  * - When `matrix` is `null` (no surface under the screen centre, or the
  *   hit-test source is not ready yet), the reticle is hidden.
+ *
+ * The hit-test pose is expressed in the WebXR reference space — i.e. the
+ * three.js scene-root/world frame. The reticle, however, is parented under
+ * `getArWorldGroup()`, whose matrix carries the GPS alignment
+ * (`alignment × WEBXR_TO_NUE`). Writing the world-space pose straight into the
+ * reticle's *local* matrix would let that parent transform double-apply, so the
+ * reticle would drift off screen-centre as the alignment rotates (only the up
+ * axis stays roughly right). To keep the reticle pinned under the screen centre
+ * we convert the world-space pose into the reticle's parent-local space, so its
+ * resulting *world* pose equals the live hit pose regardless of alignment.
  *
  * Works on any `Object3D` (not just the mesh from `createReticleMesh`) so it can
  * be unit tested without a WebGL context.
@@ -62,6 +83,14 @@ export function updateReticle(
     reticle.visible = false;
     return;
   }
-  reticle.matrix.fromArray(matrix);
+  hitPoseMatrix.fromArray(matrix);
+  const parent = reticle.parent;
+  if (parent) {
+    parent.updateWorldMatrix(true, false);
+    parentInverseWorldMatrix.copy(parent.matrixWorld).invert();
+    reticle.matrix.multiplyMatrices(parentInverseWorldMatrix, hitPoseMatrix);
+  } else {
+    reticle.matrix.copy(hitPoseMatrix);
+  }
   reticle.visible = true;
 }

@@ -21,7 +21,13 @@ subtly wrong.
   Returns a mesh with `matrixAutoUpdate = false` and `visible = false`.
 - `updateReticle(reticle: Object3D, matrix: HitMatrix | null): void` — applies
   the pose:
-  - non-null 16-element matrix → reticle adopts it verbatim and becomes visible;
+  - non-null 16-element matrix → the reticle's **world** pose adopts it and the
+    reticle becomes visible. The pose is in the WebXR reference space (the
+    three.js scene-root/world frame); when the reticle has a parent (e.g.
+    `arWorldGroup`, which carries the GPS alignment) the pose is converted into
+    the parent's local space so the reticle's _world_ pose equals the hit pose
+    regardless of the parent transform. With no parent the local matrix adopts
+    the pose verbatim.
   - `null` → reticle is hidden.
 
 Exported from `gps-plus-slam-app-framework/visualization`.
@@ -32,8 +38,13 @@ Exported from `gps-plus-slam-app-framework/visualization`.
   is written wholesale from the hit pose each frame, so letting Three.js
   recompose it from position/quaternion/scale would discard the pose.
 - The mesh is parented under `getArWorldGroup()` (AR-local space) by the caller,
-  **not** the GPS-aligned scene root — so the reticle and any placed content
-  ride the same lerped `arWorldGroup` alignment.
+  **not** the GPS-aligned scene root — so any placed content shares the same
+  scene subtree. Because the hit pose is a **live world-space pose**, the reticle
+  itself must _not_ ride the parent's alignment: `updateReticle` cancels the
+  parent transform (`reticle.matrix = parent.matrixWorld⁻¹ · pose`) so the
+  reticle stays pinned under the screen centre. Writing the pose into the local
+  matrix directly (the previous behaviour) double-applied `arWorldGroup`'s
+  alignment and drifted the reticle sideways on-device.
 - `updateReticle` operates on any `Object3D`, so it is testable without a WebGL
   context. It does not validate matrix length; callers pass the 16-element
   `XRPose.transform.matrix`.
@@ -56,8 +67,10 @@ updateReticle(reticle, hitPose ? hitPose.transform.matrix : null);
 
 [hit-test-reticle.test.ts](hit-test-reticle.test.ts) — pins: the mesh starts
 hidden with manual matrix updates; a hit pose makes it visible and is adopted
-verbatim (including a `Float32Array` pose); a `null` hit hides it (no stale
-reticle).
+verbatim when unparented (including a `Float32Array` pose); a `null` hit hides it
+(no stale reticle); and, under a transformed parent (a yaw+translation
+alignment), the reticle's resulting **world** pose equals the hit pose (the
+screen-centre-drift regression).
 
 ## Consumers
 
