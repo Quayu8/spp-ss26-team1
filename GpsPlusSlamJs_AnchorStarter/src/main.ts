@@ -34,6 +34,7 @@ import { applyChromiumProjectionLayerWorkaround } from "gps-plus-slam-app-framew
 import {
   getCurrentArPose,
   setTrackingStore,
+  setTrackingCallbacks,
 } from "gps-plus-slam-app-framework/ar/webxr-session";
 import {
   stopGpsWatch,
@@ -45,6 +46,7 @@ import {
   worldNueToGps,
 } from "gps-plus-slam-app-framework/visualization";
 import type { LatLong, LatLongAlt } from "gps-plus-slam-app-framework/core";
+import { odometryTrackingRestarted } from "gps-plus-slam-app-framework/core";
 import { Vector3 } from "three";
 
 import {
@@ -477,8 +479,19 @@ async function startAr(): Promise<void> {
   store = createSlamAppStore({ storageBackend: new NullStorageBackend() });
   store.subscribe(onStoreChanged);
 
-  // Tracking restart detection must be wired before initAR.
+  // Tracking-state pipeline must be wired before initAR. The framework's
+  // per-frame `updateTrackingState()` only dispatches `poseReceived`/`poseLost`
+  // into the store when BOTH a store is injected AND a tracking-restart
+  // callback is registered — otherwise it silently no-ops, `tracking.phase`
+  // never leaves `initializing`, and the tracking-quality report (and thus the
+  // onboarding guidance) stays pinned to "AR tracking lost" with no progress.
+  // The callback also re-bases odometry after an origin reset so alignment
+  // continues correctly across tracking restarts (same contract as the
+  // recorder).
   setTrackingStore(store);
+  setTrackingCallbacks((payload) => {
+    store?.dispatch(odometryTrackingRestarted(payload));
+  });
 
   const appContainer = el("app");
   try {
