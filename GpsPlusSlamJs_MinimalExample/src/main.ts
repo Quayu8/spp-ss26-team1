@@ -121,8 +121,9 @@ function startArInteraction(deps: {
   let hitTestSource: XRHitTestSource | null = null;
   let hitTestSourceRequested = false;
   let selectWired = false;
+  let unregisterFrameUpdate: (() => void) | null = null;
 
-  registerXrFrameUpdate(({ frame, referenceSpace, session }) => {
+  unregisterFrameUpdate = registerXrFrameUpdate(({ frame, referenceSpace, session }) => {
     if (!selectWired) {
       selectWired = true;
       // A `select` is the AR "tap". The GPS gate (decideTapPlacement) ignores
@@ -147,6 +148,12 @@ function startArInteraction(deps: {
       session.addEventListener('end', () => {
         hitTestSource = null;
         hitTestSourceRequested = false;
+        // Unregister THIS session's frame callback. `startArInteraction` runs
+        // once per `running` transition against a fresh arWorldGroup + reticle,
+        // so without this a later AR re-entry would leave the old callback (and
+        // any source it resolved after `end`) running against the new session.
+        unregisterFrameUpdate?.();
+        unregisterFrameUpdate = null;
       });
     }
 

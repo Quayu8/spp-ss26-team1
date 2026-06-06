@@ -29,7 +29,12 @@ integration over `createEnableGpsArController` + `registerXrFrameUpdate`.
 - Once `running`, installs the hit-test reticle: requests a `viewer`-space
   hit-test source once, then each XR frame reads
   `frame.getHitTestResults(source)` and drives the reticle via the framework's
-  `hit-test-reticle.ts` (`createReticleMesh` / `updateReticle`).
+  `hit-test-reticle.ts` (`createReticleMesh` / `updateReticle`). On session
+  `end` the per-session frame callback unregisters itself (via the handle from
+  `registerXrFrameUpdate`) so a later AR re-entry — which calls
+  `startArInteraction` again against a fresh `arWorldGroup` + reticle — does not
+  leave the old callback (or a hit-test source it resolved after `end`) running
+  against the new session.
 - Wires the AR `select` (tap) through the GPS gate in [placement.ts](placement.ts):
   before the first GPS fix a tap flashes a transient "waiting for GPS…" hint;
   after a fix it co-spawns the contrast pair (see below).
