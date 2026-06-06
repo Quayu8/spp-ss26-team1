@@ -77,6 +77,39 @@ describe('createEnableGpsArController — support probe', () => {
 
     expect(controller.getState().status).toBe('unsupported');
   });
+
+  // Why this test matters: refreshSupport() awaits the probe, so the status can
+  // advance during that gap. enable() is NOT blocked from the `checking` state,
+  // and refreshSupport may be called on resume while a session already runs.
+  // A late probe result must not clobber an active starting/running state and
+  // wrongly revert the button to a "not started" CTA.
+  it('does not clobber an active running state when a slow probe resolves', async () => {
+    let releaseProbe: (supported: boolean) => void = () => undefined;
+    const deps = makeDeps({
+      isWebXRSupported: vi.fn(
+        () =>
+          new Promise<boolean>((resolve) => {
+            releaseProbe = resolve;
+          })
+      ),
+    });
+    const controller = createEnableGpsArController(deps);
+
+    // Start the support probe but leave it in flight (still `checking`).
+    const refreshing = controller.refreshSupport();
+    expect(controller.getState().status).toBe('checking');
+
+    // A concurrent enable() drives the controller to `running` while the probe
+    // is still pending.
+    await controller.enable({ container: fakeContainer() });
+    expect(controller.getState().status).toBe('running');
+
+    // The slow probe now resolves — it must NOT overwrite the running state.
+    releaseProbe(true);
+    await refreshing;
+
+    expect(controller.getState().status).toBe('running');
+  });
 });
 
 describe('createEnableGpsArController — enable() success path', () => {

@@ -177,7 +177,15 @@ export function createEnableGpsArController(
 
   async function refreshSupport(): Promise<void> {
     setState({ status: 'checking' });
-    setState({ status: (await probeSupport()) ? 'ready' : 'unsupported' });
+    const supported = await probeSupport();
+    // Guard the async gap: a concurrent enable() (which is not blocked from the
+    // `checking` state) — or an already-`running` session when refreshSupport is
+    // called on resume — can advance the status while the probe is in flight.
+    // Only the `checking` state we set above is ours to replace; otherwise this
+    // stale probe result would clobber an active starting/running state and
+    // wrongly revert the button to a "not started" CTA.
+    if (state.status !== 'checking') return;
+    setState({ status: supported ? 'ready' : 'unsupported' });
   }
 
   async function probeSupport(): Promise<boolean> {
