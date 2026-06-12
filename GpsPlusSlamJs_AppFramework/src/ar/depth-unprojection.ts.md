@@ -6,11 +6,12 @@ Pure math helper that turns a persisted depth read (`screenX`, `screenY`, `depth
 
 ## Public API
 
-- **`unprojectDepthPoint(point, cameraPos, cameraRot, projectionMatrix): Vector3 | null`**
-  - `point: DepthPoint` — normalized view coordinates (top-left origin, 0–1) + z-depth in meters, exactly as fed to `getDepthInMeters`.
+- **`createDepthUnprojector(cameraPos, cameraRot, projectionMatrix): DepthUnprojector | null`** — sample-scoped factory.
   - `cameraPos: Vector3` / `cameraRot: Quaternion` — raw WebXR camera pose from `DepthSample`.
   - `projectionMatrix: Matrix4 | undefined` — column-major 16-tuple of the capturing `XRView` (`DepthSample.projectionMatrix`).
-  - Returns the point in raw WebXR space, or `null` for unusable input.
+  - Computes the projection inverse, camera quaternion and position **once**, returning a `{ unproject(point): Vector3 | null }` whose per-point path only does the cheap NDC→view→world transform (reusing pre-allocated `vec3`/`vec4` temporaries). Returns `null` when the sample cannot be unprojected at all (missing/singular matrix) — the designed old-recordings skip path.
+  - **Use this when folding many points from one sample** (e.g. `OccupancyGrid.addSample`): build once, reuse for every point, instead of re-inverting the matrix and re-allocating the quaternion per point.
+- **`unprojectDepthPoint(point, cameraPos, cameraRot, projectionMatrix): Vector3 | null`** — one-off convenience wrapper over `createDepthUnprojector` (builds a single-use unprojector). Same arguments plus the `point: DepthPoint` (normalized top-left-origin view coordinates 0–1 + z-depth in meters, exactly as fed to `getDepthInMeters`). Returns the point in raw WebXR space, or `null` for unusable input.
 
 ## Invariants & Assumptions
 

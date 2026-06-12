@@ -48,7 +48,11 @@ export {
 } from './depth-sampler.js';
 
 // --- depth-unprojection ---
-export { unprojectDepthPoint } from './depth-unprojection.js';
+export {
+  unprojectDepthPoint,
+  createDepthUnprojector,
+  type DepthUnprojector,
+} from './depth-unprojection.js';
 
 // --- bresenham3d ---
 export { bresenham3d, type GridCell } from './bresenham3d.js';

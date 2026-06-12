@@ -12,7 +12,10 @@
 import { describe, it, expect } from 'vitest';
 import { mat4 } from 'gl-matrix';
 import type { Matrix4, Quaternion, Vector3 } from 'gps-plus-slam-js';
-import { unprojectDepthPoint } from './depth-unprojection';
+import {
+  unprojectDepthPoint,
+  createDepthUnprojector,
+} from './depth-unprojection';
 
 const IDENTITY_ROT: Quaternion = [0, 0, 0, 1];
 const ORIGIN: Vector3 = [0, 0, 0];
@@ -148,5 +151,49 @@ describe('unprojectDepthPoint', () => {
     expect(result![0]).toBeCloseTo(-2, 6);
     expect(result![1]).toBeCloseTo(0, 6);
     expect(result![2]).toBeCloseTo(0, 6);
+  });
+});
+
+describe('createDepthUnprojector', () => {
+  // Why this test matters: the sample-scoped unprojector reuses pre-allocated
+  // vec3/vec4/mat4/quat temporaries across every point to avoid per-point
+  // allocation. This guards that the reuse is correct — a reused unprojector
+  // must return byte-identical results to independent one-off calls, with no
+  // bleed from one point's intermediate state into the next.
+  it('returns null for a missing or singular projection matrix', () => {
+    expect(createDepthUnprojector(ORIGIN, IDENTITY_ROT, undefined)).toBeNull();
+    const singular = Array.from(mat4.create()).map(
+      () => 0
+    ) as unknown as Matrix4;
+    expect(createDepthUnprojector(ORIGIN, IDENTITY_ROT, singular)).toBeNull();
+  });
+
+  it('reused over many points matches independent unprojectDepthPoint calls', () => {
+    const p = perspective(Math.PI / 3, 16 / 9);
+    const camPos: Vector3 = [3, -1, 7];
+    const halfAngle = Math.PI / 5;
+    const rot: Quaternion = [0, Math.sin(halfAngle), 0, Math.cos(halfAngle)];
+    const points = [
+      { screenX: 0.5, screenY: 0.5, depthM: 2 },
+      { screenX: 0.1, screenY: 0.9, depthM: 5.5 },
+      { screenX: 0.8, screenY: 0.2, depthM: 0.4 },
+      { screenX: 1.2, screenY: 0.5, depthM: 2 }, // out of range → null
+      { screenX: 0.5, screenY: 0.5, depthM: 2 }, // repeat first: must re-yield
+    ];
+
+    const unprojector = createDepthUnprojector(camPos, rot, p)!;
+    expect(unprojector).not.toBeNull();
+    // Reused results must be deeply equal to the one-off path for every point
+    // (identical Float32 math) — and `toEqual` covers the null case uniformly,
+    // so no per-point branching (which would trip no-conditional-expect).
+    const reused = points.map((point) => unprojector.unproject(point));
+    const oneOff = points.map((point) =>
+      unprojectDepthPoint(point, camPos, rot, p)
+    );
+    expect(reused).toEqual(oneOff);
+    // Sanity: the batch actually exercises both a null and several non-null
+    // outcomes, so the equality above is not vacuously comparing all-nulls.
+    expect(reused.filter((r) => r === null)).toHaveLength(1);
+    expect(reused.filter((r) => r !== null).length).toBeGreaterThan(1);
   });
 });

@@ -24,7 +24,7 @@
 
 import type { Vector3 } from 'gps-plus-slam-js';
 import type { DepthSample, RgbTuple } from '../types/ar-types';
-import { unprojectDepthPoint } from './depth-unprojection';
+import { createDepthUnprojector } from './depth-unprojection';
 import { bresenham3d, type GridCell } from './bresenham3d';
 
 export interface OccupancyGridOptions {
@@ -99,17 +99,23 @@ export class OccupancyGrid {
     if (!isFiniteTriple(sample.cameraPos)) {
       return 0;
     }
+    // Projection inverse and camera pose are sample-invariant — build the
+    // unprojector once and reuse it for every point (null when the sample has
+    // no usable projection matrix, e.g. pre-intrinsics recordings).
+    const unprojector = createDepthUnprojector(
+      sample.cameraPos,
+      sample.cameraRot,
+      sample.projectionMatrix
+    );
+    if (!unprojector) {
+      return 0;
+    }
     const cameraCell = this.cellForPosition(sample.cameraPos);
     // Pass 1: carve free space along every ray, collecting endpoint cells
     // (with the observing point's color, if any — Iter 8).
     const endpoints: Array<{ cell: GridCell; rgb?: RgbTuple }> = [];
     for (const point of sample.points) {
-      const world = unprojectDepthPoint(
-        point,
-        sample.cameraPos,
-        sample.cameraRot,
-        sample.projectionMatrix
-      );
+      const world = unprojector.unproject(point);
       if (!world) {
         continue;
       }
