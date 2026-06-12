@@ -37,8 +37,11 @@ export interface WireOccupancyGridSubscribersOptions<
 > {
   readonly storeRef: StoreRef<RecorderStore>;
   readonly grid: TGrid;
+  // NoInfer: TGrid must be inferred from `grid` alone — otherwise TS
+  // widens it to the OccupancyGridSink constraint and rejects visualizers
+  // whose refresh() needs the richer concrete grid type.
   readonly visualizer: {
-    refresh(grid: TGrid): void;
+    refresh(grid: NoInfer<TGrid>): void;
     clear(): void;
   };
   /** Defaults to {@link DEFAULT_REFRESH_INTERVAL_MS}. */

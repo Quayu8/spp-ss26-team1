@@ -35,6 +35,12 @@ This module is the entry point that runs on page load. It also exports the follo
   always distinguish between unique reference points (`refPointDefs.length`) and
   total observations (`flattenRefPointsToMarks(refPointDefs).length`). Use format:
   `"N ref points (M observations)"` to avoid confusion.
+- **Best-effort AR scene layers**: the frame-tile visualizer (F3.5d) and the
+  occupancy-grid cubes (2026-06-11 depth occupancy-grid port plan, Iter 5) are
+  each wired after `initAR` inside their own `try/catch` — a failure logs a
+  warning and recording continues without that layer. Both are torn down in
+  `resetMainState()` (unsubscribe + dispose; the occupancy grid itself is a
+  plain in-memory structure dropped with its reference).
 
 ## Examples
 
