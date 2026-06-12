@@ -9,6 +9,7 @@
 
 import type { Matrix4 } from 'gps-plus-slam-js';
 import type { ARPose, DepthPoint, DepthSample } from '../types/ar-types';
+import type { RgbLookup } from './depth-rgb-lookup';
 import { extractOdomPosition } from '../state/gps-event-coordinator';
 
 export type { DepthSample } from '../types/ar-types';
@@ -27,6 +28,13 @@ export interface DepthSamplerConfig {
   gridSize: number;
   /** Time in ms to wait before declaring depth unavailable. Default: 5000ms */
   unavailabilityThresholdMs: number;
+  /**
+   * Whether to enrich each sampled point with the camera color at its view
+   * coordinates (occupancy-grid port plan Iter 8). Requires the
+   * `acquireRgbLookup` callback; gates the per-sample GPU blit+readback.
+   * Default: true.
+   */
+  rgb: boolean;
 }
 
 /**
@@ -43,6 +51,15 @@ export interface DepthSamplerCallbacks {
    * Field Test Readiness Issue #8.
    */
   onDepthUnavailable?: () => void;
+  /**
+   * Lazily acquire a camera-color lookup for the CURRENT XR frame
+   * (occupancy-grid port plan Iter 8). Invoked at most once per *emitted*
+   * sample (never per frame or per point — acquisition is a GPU-stall
+   * blit+readback) and only while `config.rgb` is true. Returning `null`
+   * (or throwing) yields color-less points; the returned lookup is used
+   * synchronously within the same frame callback.
+   */
+  acquireRgbLookup?: () => RgbLookup | null;
 }
 
 /**
@@ -94,6 +111,7 @@ const DEFAULT_CONFIG: DepthSamplerConfig = {
   intervalMs: 1000,
   gridSize: 16,
   unavailabilityThresholdMs: 5000,
+  rgb: true,
 };
 
 /**
@@ -190,6 +208,9 @@ export class DepthSampler {
     if (isFinitePositive(config.unavailabilityThresholdMs)) {
       this.config.unavailabilityThresholdMs = config.unavailabilityThresholdMs;
     }
+    if (typeof config.rgb === 'boolean') {
+      this.config.rgb = config.rgb;
+    }
   }
 
   /**
@@ -225,8 +246,10 @@ export class DepthSampler {
       return;
     }
 
-    // Sample the grid
-    const points = this.sampleGrid(depthInfo);
+    // Sample the grid, optionally enriched with the camera color at each
+    // point (acquired at most once per emitted sample — see the callback's
+    // contract; failures degrade to color-less points).
+    const points = this.sampleGrid(depthInfo, this.acquireRgbLookupSafely());
 
     // Create sample — convert DOMHighResTimeStamp to epoch ms for consistency
     // with all other action timestamps (GPS events, images, reference points)
@@ -253,9 +276,29 @@ export class DepthSampler {
   }
 
   /**
-   * Sample a grid of depth points from the depth buffer.
+   * Acquire the per-sample RGB lookup, gated by `config.rgb` and guarded so
+   * a failing acquisition (e.g. GL context loss during the blit) can never
+   * break the sample emission in the XR frame loop.
    */
-  private sampleGrid(depthInfo: DepthInfo): DepthPoint[] {
+  private acquireRgbLookupSafely(): RgbLookup | null {
+    if (!this.config.rgb || !this.callbacks.acquireRgbLookup) {
+      return null;
+    }
+    try {
+      return this.callbacks.acquireRgbLookup();
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * Sample a grid of depth points from the depth buffer, attaching the
+   * camera color per point when a lookup is available.
+   */
+  private sampleGrid(
+    depthInfo: DepthInfo,
+    rgbLookup: RgbLookup | null
+  ): DepthPoint[] {
     const points: DepthPoint[] = [];
     const gridSize = this.config.gridSize;
 
@@ -269,10 +312,14 @@ export class DepthSampler {
         // Sample depth at this position
         const depthM = depthInfo.getDepthInMeters(screenX, screenY);
 
+        // Spread keeps `rgb` ABSENT (not `undefined`) when there is no
+        // color, so persisted JSON stays identical to the pre-Iter-8 format
+        const rgb = rgbLookup?.(screenX, screenY);
         points.push({
           screenX,
           screenY,
           depthM,
+          ...(rgb ? { rgb } : {}),
         });
       }
     }

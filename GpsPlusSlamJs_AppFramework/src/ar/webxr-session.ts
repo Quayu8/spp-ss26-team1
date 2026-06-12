@@ -61,6 +61,7 @@ import {
   type DepthInfo,
 } from './depth-sampler';
 import { CameraBlitCapture, computeCaptureSize } from './camera-blit-capture';
+import { createRgbLookup, type RgbLookup } from './depth-rgb-lookup';
 import { acquireCameraTexture } from './xr-camera-texture';
 import { clearFrameUpdates, runFrameUpdates } from './frame-loop';
 import { runSessionDisposers } from './session-disposers';
@@ -221,6 +222,10 @@ export function resetWebXRState(): void {
   depthSampler = null;
   onDepthCaptured = null;
   onDepthUnavailable = null;
+  if (depthRgbBlit) {
+    depthRgbBlit.dispose();
+    depthRgbBlit = null;
+  }
   onFrameCallback = null;
   if (css3dManager) {
     css3dManager.dispose();
@@ -357,6 +362,20 @@ let css3dManager: Css3dRendererManager | null = null;
 let blitCapture: CameraBlitCapture | null = null;
 
 /**
+ * Dedicated small blit target for per-depth-sample RGB lookups
+ * (occupancy-grid port plan Iter 8). Separate from `blitCapture`: the JPEG
+ * path resizes to (camera resolution ÷ divisor) while this one stays tiny —
+ * only ≤ gridSize² positions are ever read from it, so 256×192 suffices and
+ * keeps the 1 Hz readback stall negligible. Created lazily on the first
+ * sample that needs it (no GPU allocation when the rgb option is off),
+ * disposed by resetWebXRState().
+ */
+let depthRgbBlit: CameraBlitCapture | null = null;
+
+/** Readback size for the depth-RGB blit (plan §5: "e.g. 256×192 suffices"). */
+const DEPTH_RGB_BLIT_CONFIG = { width: 256, height: 192 };
+
+/**
  * Latest WebXR camera texture, updated each frame when camera-access is enabled.
  * Acquired via Three.js's renderer.xr.getCameraTexture() API (ExternalTexture).
  * @see xr-camera-texture.ts
@@ -396,6 +415,24 @@ function cleanupBlitResources(): void {
     blitCapture = null;
   }
   latestCameraTexture = null;
+}
+
+/**
+ * Acquire a camera-color lookup for the current XR frame (passed to the
+ * DepthSampler as `acquireRgbLookup`; called at most once per emitted
+ * sample). Returns null — color-less points — when camera access or the
+ * readback is unavailable; the blit instance lazily (re)creates itself so
+ * a disposal elsewhere is self-healing.
+ */
+function acquireDepthRgbLookup(): RgbLookup | null {
+  if (!renderer || !latestCameraTexture) {
+    return null;
+  }
+  depthRgbBlit ??= new CameraBlitCapture(DEPTH_RGB_BLIT_CONFIG);
+  const readback = depthRgbBlit.captureToPixels(renderer, latestCameraTexture);
+  return readback
+    ? createRgbLookup(readback.pixels, readback.width, readback.height)
+    : null;
 }
 
 /**
@@ -794,6 +831,9 @@ export async function initAR(
     const depthCallbacks: DepthSamplerCallbacks = {
       onSampleCaptured: onDepthCaptured,
       getCurrentPose: getCurrentArPose,
+      // Iter 8: per-sample camera color for the occupancy-grid voxels.
+      // Gated inside the sampler by its `rgb` config (recording option).
+      acquireRgbLookup: acquireDepthRgbLookup,
       // Field Test Readiness Issue #8: Notify user if depth is unavailable
       onDepthUnavailable: onDepthUnavailable ?? undefined,
     };

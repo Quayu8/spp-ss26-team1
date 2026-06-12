@@ -13,6 +13,7 @@ Plan: `GpsPlusSlamJs_Docs/docs/2026-06-11-depth-occupancy-grid-port-plan.md`.
 - **`getOccupiedCells(minObservations = 1): GridCell[]`** — cells observed at least that often.
 - **`cellForPosition(pos): GridCell`** — round-quantization per axis (−0 normalized).
 - **`getCellCenter(cell): Vector3`** — `cell · cellSizeM`.
+- **`getCellColor(cell): RgbTuple | null`** — running-average camera color of the cell's COLORED observations (Iter 8), rounded and clamped to 0–255 per channel; `null` for unknown cells or cells only ever observed without `point.rgb` (visualizers fall back to height-based coloring). Color-less observations advance the observation count but never dilute the average; non-finite rgb triples are ignored defensively.
 - **`raycast(startPos, endPos, minObservations = 1): Vector3 | null`** — center of the first sufficiently-observed cell on the Bresenham line (port of Unity `TryRaycast`; hook for future cursor/floor-detection parity). Returns `null` for non-finite input or no hit.
 - **`clear(): void`** / **`size: number`**.
 
@@ -40,5 +41,5 @@ const hit = grid.raycast(cameraPos, forwardPoint); // cursor placement
 
 ## Tests
 
-- `occupancy-grid.test.ts` — construction validation, add/skip paths (old recordings, invalid points, non-finite camera), counts, carve-stop protection, same-cell deviation, scene-change carving, intra-sample point-order independence, center formula, raycast hit/miss/min-observations, clear.
-- `occupancy-grid.property.test.ts` — fast-check: quantization↔center within `cellSizeM/2` per axis (guards against Unity's half-cell offset); observed cells survive any repeat observation count (incl. degenerate same-cell case); a nearer on-ray cell is carved iff it is at least `carveStopCells` in front of a deeper observation.
+- `occupancy-grid.test.ts` — construction validation, add/skip paths (old recordings, invalid points, non-finite camera), counts, carve-stop protection, same-cell deviation, scene-change carving, intra-sample point-order independence, center formula, raycast hit/miss/min-observations, clear, and the Iter-8 cell-color block (verbatim single observation, rounded averaging, no dilution by color-less observations, non-finite rejection, clear drops colors).
+- `occupancy-grid.property.test.ts` — fast-check: quantization↔center within `cellSizeM/2` per axis (guards against Unity's half-cell offset); observed cells survive any repeat observation count (incl. degenerate same-cell case); a nearer on-ray cell is carved iff it is at least `carveStopCells` in front of a deeper observation; cell color equals the rounded per-channel mean of exactly the colored observations (Iter 8).

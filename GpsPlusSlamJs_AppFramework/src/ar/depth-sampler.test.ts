@@ -375,6 +375,131 @@ describe('DepthSampler', () => {
     });
   });
 
+  describe('RGB enrichment (occupancy-grid port plan Iter 8)', () => {
+    /**
+     * Why these tests matter:
+     * Per-point RGB rides the persisted DepthSample, so the enrichment
+     * contract has three load-bearing properties: (1) the lookup is
+     * acquired at most ONCE per *emitted* sample — never per frame or per
+     * point — because acquisition is a GPU-stall blit+readback; (2) the
+     * `rgb` recording option must actually gate the work (a dead knob here
+     * silently burns GPU time, the Iter-6 lesson in reverse); (3) every
+     * failure path (no callback, null lookup, throwing callback, null per
+     * point) degrades to color-less points, never a crash in the XR frame
+     * loop.
+     */
+    it('attaches the looked-up rgb to every point, acquiring the lookup once per sample', () => {
+      const acquireRgbLookup = vi.fn(
+        () => (x: number, y: number) =>
+          [Math.round(x * 100), Math.round(y * 100), 7] as const
+      );
+      const rgbSampler = new DepthSampler(
+        { ...callbacks, acquireRgbLookup },
+        { gridSize: 2 }
+      );
+      rgbSampler.start();
+      rgbSampler.onFrame(0, createMockDepthInfo(2));
+      rgbSampler.onFrame(100, createMockDepthInfo(2)); // within interval — no sample
+
+      expect(acquireRgbLookup).toHaveBeenCalledTimes(1);
+      const sample = vi.mocked(callbacks.onSampleCaptured).mock.calls[0][0];
+      expect(sample.points).toHaveLength(4);
+      for (const point of sample.points) {
+        expect(point.rgb).toEqual([
+          Math.round(point.screenX * 100),
+          Math.round(point.screenY * 100),
+          7,
+        ]);
+      }
+      rgbSampler.stop();
+    });
+
+    it('rgb: false disables the work entirely (option must reach the consumer)', () => {
+      const acquireRgbLookup = vi.fn(() => () => [1, 2, 3] as const);
+      const rgbSampler = new DepthSampler(
+        { ...callbacks, acquireRgbLookup },
+        { gridSize: 2 }
+      );
+      rgbSampler.updateConfig({ rgb: false });
+      rgbSampler.start();
+      rgbSampler.onFrame(0, createMockDepthInfo(2));
+
+      expect(acquireRgbLookup).not.toHaveBeenCalled();
+      const sample = vi.mocked(callbacks.onSampleCaptured).mock.calls[0][0];
+      expect(sample.points[0].rgb).toBeUndefined();
+      rgbSampler.stop();
+    });
+
+    it('rgb defaults to true and updateConfig ignores non-boolean values', () => {
+      expect(sampler.getConfig().rgb).toBe(true);
+      sampler.updateConfig({ rgb: 'yes' as unknown as boolean });
+      expect(sampler.getConfig().rgb).toBe(true);
+      sampler.updateConfig({ rgb: false });
+      expect(sampler.getConfig().rgb).toBe(false);
+    });
+
+    it('emits color-less points when no acquireRgbLookup callback is provided (back-compat)', () => {
+      sampler.start();
+      sampler.onFrame(0, createMockDepthInfo(3));
+      const sample = vi.mocked(callbacks.onSampleCaptured).mock.calls[0][0];
+      expect(sample.points[0].rgb).toBeUndefined();
+      // The field must be ABSENT, not undefined, so persisted JSON is
+      // identical to the pre-Iter-8 format.
+      expect('rgb' in sample.points[0]).toBe(false);
+    });
+
+    it('emits color-less points when the lookup acquisition returns null', () => {
+      const rgbSampler = new DepthSampler(
+        { ...callbacks, acquireRgbLookup: () => null },
+        { gridSize: 2 }
+      );
+      rgbSampler.start();
+      rgbSampler.onFrame(0, createMockDepthInfo(2));
+      const sample = vi.mocked(callbacks.onSampleCaptured).mock.calls[0][0];
+      expect(sample.points.every((p) => p.rgb === undefined)).toBe(true);
+      rgbSampler.stop();
+    });
+
+    it('still emits the sample when the lookup acquisition throws (best-effort)', () => {
+      const rgbSampler = new DepthSampler(
+        {
+          ...callbacks,
+          acquireRgbLookup: () => {
+            throw new Error('GL context lost');
+          },
+        },
+        { gridSize: 2 }
+      );
+      rgbSampler.start();
+      expect(() => rgbSampler.onFrame(0, createMockDepthInfo(2))).not.toThrow();
+      const sample = vi.mocked(callbacks.onSampleCaptured).mock.calls[0][0];
+      expect(sample.points).toHaveLength(4);
+      expect(sample.points[0].rgb).toBeUndefined();
+      rgbSampler.stop();
+    });
+
+    it('omits rgb for individual points where the lookup returns null', () => {
+      const rgbSampler = new DepthSampler(
+        {
+          ...callbacks,
+          // Only points in the left half of the view get a color
+          acquireRgbLookup: () => (x: number) =>
+            x < 0.5 ? ([9, 9, 9] as const) : null,
+        },
+        { gridSize: 2 }
+      );
+      rgbSampler.start();
+      rgbSampler.onFrame(0, createMockDepthInfo(2));
+      const sample = vi.mocked(callbacks.onSampleCaptured).mock.calls[0][0];
+      const withRgb = sample.points.filter((p) => p.rgb !== undefined);
+      const withoutRgb = sample.points.filter((p) => p.rgb === undefined);
+      expect(withRgb).toHaveLength(2); // 2×2 grid → left column
+      expect(withoutRgb).toHaveLength(2);
+      expect(withRgb[0].rgb).toEqual([9, 9, 9]);
+      rgbSampler.stop();
+    });
+  });
+
   describe('depth unavailability detection', () => {
     /**
      * These tests validate Field Test Readiness Issue #8:

@@ -360,7 +360,7 @@ const defaultOptions: RecordingOptions = {
     quality: 0.8,
     resolutionDivisor: 1,
   },
-  depth: { enabled: false, intervalMs: 1000, gridSize: 3 },
+  depth: { enabled: false, intervalMs: 1000, gridSize: 3, rgb: true },
   arCrashIsolation: { ...DEFAULT_RECORDING_OPTIONS.arCrashIsolation },
 };
 
@@ -632,7 +632,7 @@ describe('handleStartRecording', () => {
         quality: 0.9,
         resolutionDivisor: 2,
       },
-      depth: { enabled: false, intervalMs: 1000, gridSize: 3 },
+      depth: { enabled: false, intervalMs: 1000, gridSize: 3, rgb: true },
       arCrashIsolation: { ...DEFAULT_RECORDING_OPTIONS.arCrashIsolation },
     };
     deps = createMockDeps({ getRecordingOptions: () => opts });
@@ -653,10 +653,12 @@ describe('handleStartRecording', () => {
 
   it('should start depth capture when enabled in options', async () => {
     // Why: Depth capture is controlled by user settings — and the user's
-    // interval/grid values must actually reach the sampler. They were dead
-    // knobs before startDepthCapture accepted a config (occupancy-grid
+    // interval/grid/rgb values must actually reach the sampler. They were
+    // dead knobs before startDepthCapture accepted a config (occupancy-grid
     // port plan Iter 6; see 2026-06-12-payload-rebuild-field-drop-audit.md
-    // F3), so this asserts the exact values, not just the call.
+    // F3), so this asserts the exact values, not just the call. The rgb
+    // flag (Iter 8 voxel coloring) rides the same forward-the-whole-section
+    // seam, so it reaches the sampler with no seam edit.
     const opts: RecordingOptions = {
       images: {
         enabled: false,
@@ -664,7 +666,7 @@ describe('handleStartRecording', () => {
         quality: 0.8,
         resolutionDivisor: 1,
       },
-      depth: { enabled: true, intervalMs: 500, gridSize: 3 },
+      depth: { enabled: true, intervalMs: 500, gridSize: 3, rgb: false },
       arCrashIsolation: { ...DEFAULT_RECORDING_OPTIONS.arCrashIsolation },
     };
     deps = createMockDeps({ getRecordingOptions: () => opts });
@@ -673,6 +675,7 @@ describe('handleStartRecording', () => {
     expect(mockStartDepthCapture).toHaveBeenCalledWith({
       intervalMs: 500,
       gridSize: 3,
+      rgb: false,
     });
   });
 

@@ -66,6 +66,7 @@ interface DepthPoint {
   screenX: number; // Normalized screen X coordinate (0-1)
   screenY: number; // Normalized screen Y coordinate (0-1)
   depthM: number; // Depth value in meters
+  rgb?: RgbTuple; // Camera color at (screenX, screenY), 0-255 ints (Iter 8, additive)
 }
 ```
 
@@ -83,6 +84,7 @@ interface DepthSample {
   cameraPos: Vector3; // Camera position [x, y, z] (readonly tuple)
   cameraRot: Quaternion; // Camera rotation quaternion [x, y, z, w] (readonly tuple)
   points: DepthPoint[]; // Grid of depth points
+  projectionMatrix?: Matrix4; // Capturing XRView intrinsics (additive, 2026-06)
 }
 ```
 

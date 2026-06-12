@@ -9,7 +9,8 @@ Shared type definitions for AR-related modules, extracted to avoid circular depe
 - **`ArPoseTuples`** — `{ position: Vector3, rotation: Quaternion }` tuple-form pose for storage/serialization (library tuple types from `gps-plus-slam-js`).
 - **`WebXRVec3` / `WebXRQuaternion`** — object-form `{x,y,z}` / `{x,y,z,w}` as returned by the WebXR API (`XRViewerPose`), distinct from the library's readonly tuples.
 - **`ARPose`** — `{ position: WebXRVec3, orientation: WebXRQuaternion }`, the raw local-floor device pose (NOT alignment-transformed).
-- **`DepthPoint`** — `{ screenX, screenY, depthM }`, one normalized-view depth read.
+- **`DepthPoint`** — `{ screenX, screenY, depthM, rgb? }`, one normalized-view depth read; optional `rgb` (Iter 8) is the camera color sampled in the same XR frame — additive persisted field, absent on old recordings or with the rgb recording option off.
+- **`RgbTuple`** — `readonly [number, number, number]`, sRGB 0–255 per channel (kept as plain ints for compact persisted JSON).
 - **`DepthSample`** — `{ timestamp, cameraPos, cameraRot, points, projectionMatrix? }`, the persisted payload of `recording/recordDepthSample`.
 
 ## Invariants & Assumptions

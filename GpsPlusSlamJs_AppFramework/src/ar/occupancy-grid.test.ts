@@ -40,6 +40,24 @@ function makeSample(
   };
 }
 
+/**
+ * Build a single-cell sample (center-screen point) carrying an optional
+ * per-point color — the Iter-8 RGB voxel-coloring shape.
+ */
+function makeColoredSample(
+  cameraPos: Vector3,
+  depthM: number,
+  rgb?: readonly [number, number, number]
+): DepthSample {
+  return {
+    timestamp: 0,
+    cameraPos,
+    cameraRot: [0, 0, 0, 1],
+    points: [{ screenX: 0.5, screenY: 0.5, depthM, ...(rgb ? { rgb } : {}) }],
+    projectionMatrix: PROJECTION,
+  };
+}
+
 describe('OccupancyGrid', () => {
   describe('construction', () => {
     it('defaults to 15 cm cells and carve stop distance 2 (Unity parity)', () => {
@@ -58,6 +76,65 @@ describe('OccupancyGrid', () => {
       expect(() => new OccupancyGrid({ carveStopCells: 1.5 })).toThrow(
         RangeError
       );
+    });
+  });
+
+  describe('cell colors (Iter 8 RGB voxel coloring)', () => {
+    /**
+     * Why these tests matter:
+     * The per-cell running-average color is what the cube visualizer
+     * renders; the contract has two subtle parts a naive implementation
+     * gets wrong: (1) color-less observations (rgb option off, old
+     * recordings) must increment the OBSERVATION count without diluting
+     * the color average toward black; (2) the average must be a true
+     * per-channel mean of however many colored observations arrived.
+     */
+    it('returns null for unknown cells and for cells observed without color', () => {
+      const grid = new OccupancyGrid({ cellSizeM: 1 });
+      expect(grid.getCellColor([0, 0, -5])).toBeNull();
+      grid.addSample(makeColoredSample([0, 0, 0], 5)); // no rgb
+      expect(grid.getCellColor([0, 0, -5])).toBeNull();
+    });
+
+    it('stores a single colored observation verbatim', () => {
+      const grid = new OccupancyGrid({ cellSizeM: 1 });
+      grid.addSample(makeColoredSample([0, 0, 0], 5, [120, 45, 200]));
+      expect(grid.getCellColor([0, 0, -5])).toEqual([120, 45, 200]);
+    });
+
+    it('averages repeated colored observations per channel (rounded)', () => {
+      const grid = new OccupancyGrid({ cellSizeM: 1 });
+      grid.addSample(makeColoredSample([0, 0, 0], 5, [100, 0, 10]));
+      grid.addSample(makeColoredSample([0, 0, 0], 5, [200, 100, 15]));
+      expect(grid.getCellColor([0, 0, -5])).toEqual([150, 50, 13]); // 12.5 → 13
+    });
+
+    it('color-less observations do not dilute the average', () => {
+      const grid = new OccupancyGrid({ cellSizeM: 1 });
+      grid.addSample(makeColoredSample([0, 0, 0], 5, [100, 100, 100]));
+      grid.addSample(makeColoredSample([0, 0, 0], 5)); // observed, no rgb
+      expect(grid.getCellColor([0, 0, -5])).toEqual([100, 100, 100]);
+      // …while the observation count still advanced to 2
+      expect(grid.getOccupiedCells(2)).toContainEqual([0, 0, -5]);
+    });
+
+    it('ignores non-finite color channels defensively (bad persisted data)', () => {
+      const grid = new OccupancyGrid({ cellSizeM: 1 });
+      grid.addSample(
+        makeColoredSample([0, 0, 0], 5, [NaN, 10, 10] as unknown as readonly [
+          number,
+          number,
+          number,
+        ])
+      );
+      expect(grid.getCellColor([0, 0, -5])).toBeNull();
+    });
+
+    it('clear() drops colors with the cells', () => {
+      const grid = new OccupancyGrid({ cellSizeM: 1 });
+      grid.addSample(makeColoredSample([0, 0, 0], 5, [1, 2, 3]));
+      grid.clear();
+      expect(grid.getCellColor([0, 0, -5])).toBeNull();
     });
   });
 

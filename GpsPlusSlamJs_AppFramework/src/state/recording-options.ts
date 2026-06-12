@@ -66,6 +66,13 @@ export interface DepthCaptureOptions {
    * populate the AR-space occupancy grid (2026-06-11 port plan §1).
    */
   gridSize: number;
+  /**
+   * Whether to enrich each depth point with the camera color at its view
+   * coordinates (RGB voxel coloring, occupancy-grid port plan Iter 8).
+   * Costs one small GPU blit+readback per sample (~1 Hz); when off, the
+   * occupancy cubes keep the height-based coloring. Default: true.
+   */
+  rgb: boolean;
 }
 
 /**
@@ -114,6 +121,7 @@ export const DEFAULT_RECORDING_OPTIONS: RecordingOptions = {
     enabled: true,
     intervalMs: 1000, // 1 sample per second
     gridSize: 16, // 16×16 = 256 points per sample (occupancy-grid density)
+    rgb: true, // RGB voxel coloring (Iter 8)
   },
   images: {
     enabled: true,
@@ -217,6 +225,7 @@ export function validateDepthOptions(
       DEPTH_CONSTRAINTS.gridSize.min,
       DEPTH_CONSTRAINTS.gridSize.max
     ),
+    rgb: typeof options.rgb === 'boolean' ? options.rgb : defaults.rgb,
   };
 }
 

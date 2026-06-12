@@ -36,6 +36,12 @@ import { WEBXR_TO_NUE } from 'gps-plus-slam-app-framework/ar/webxr-nue-basis';
 export interface OccupancyGridSource {
   getOccupiedCells(minObservations?: number): readonly GridCell[];
   getCellCenter(cell: GridCell): readonly [number, number, number];
+  /**
+   * Per-cell average camera color (0–255 per channel, Iter 8), or null
+   * when the cell carries no color — the cube then falls back to the
+   * height ramp.
+   */
+  getCellColor(cell: GridCell): readonly [number, number, number] | null;
 }
 
 export interface OccupancyCubesVisualizerOptions {
@@ -141,7 +147,15 @@ export class OccupancyCubesVisualizer {
       matrix.makeScale(this.cubeSizeM, this.cubeSizeM, this.cubeSizeM);
       matrix.setPosition(x, y, z);
       this.mesh.setMatrixAt(i, matrix);
-      this.mesh.setColorAt(i, heightColor(color, y));
+      // Iter 8: real camera color when the cell has one; height ramp for
+      // color-less cells (rgb option off, pre-Iter-8 recordings).
+      const rgb = grid.getCellColor(cell);
+      this.mesh.setColorAt(
+        i,
+        rgb
+          ? color.setRGB(rgb[0] / 255, rgb[1] / 255, rgb[2] / 255)
+          : heightColor(color, y)
+      );
     }
     this.mesh.count = cells.length;
     this.mesh.instanceMatrix.needsUpdate = true;

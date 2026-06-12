@@ -33,6 +33,45 @@ function makeSample(cameraPos: Vector3, depths: number[]): DepthSample {
 }
 
 describe('OccupancyGrid properties', () => {
+  /**
+   * Why this property matters (Iter 8): the cell color must be the true
+   * per-channel rounded mean of exactly the COLORED observations — mixing
+   * in color-less observations (old recordings, rgb option off) or losing
+   * precision over many accumulations would drift every voxel's color.
+   */
+  it('cell color equals the rounded per-channel mean of the colored observations only', () => {
+    const rgbArb = fc.tuple(
+      fc.integer({ min: 0, max: 255 }),
+      fc.integer({ min: 0, max: 255 }),
+      fc.integer({ min: 0, max: 255 })
+    );
+    fc.assert(
+      fc.property(
+        fc.array(rgbArb, { minLength: 1, maxLength: 30 }),
+        fc.integer({ min: 0, max: 10 }),
+        (colors, colorlessObservations) => {
+          const grid = new OccupancyGrid({ cellSizeM: 1 });
+          for (const rgb of colors) {
+            grid.addSample({
+              ...makeSample([0, 0, 0], []),
+              points: [{ screenX: 0.5, screenY: 0.5, depthM: 5, rgb }],
+            });
+          }
+          for (let i = 0; i < colorlessObservations; i++) {
+            grid.addSample(makeSample([0, 0, 0], [5]));
+          }
+          const expected = [0, 1, 2].map((channel) =>
+            Math.round(
+              colors.reduce((sum, rgb) => sum + rgb[channel]!, 0) /
+                colors.length
+            )
+          );
+          expect(grid.getCellColor([0, 0, -5])).toEqual(expected);
+        }
+      )
+    );
+  });
+
   it('getCellCenter(cellForPosition(p)) stays within cellSizeM/2 of p per axis', () => {
     fc.assert(
       fc.property(

@@ -27,12 +27,14 @@ import { WEBXR_TO_NUE } from 'gps-plus-slam-app-framework/ar/webxr-nue-basis';
 
 function makeGridSource(
   cells: GridCell[],
-  cellSizeM = 0.15
+  cellSizeM = 0.15,
+  getCellColor: OccupancyGridSource['getCellColor'] = () => null
 ): OccupancyGridSource & { getOccupiedCells: ReturnType<typeof vi.fn> } {
   return {
     getOccupiedCells: vi.fn(() => cells),
     getCellCenter: (cell: GridCell) =>
       [cell[0] * cellSizeM, cell[1] * cellSizeM, cell[2] * cellSizeM] as const,
+    getCellColor,
   };
 }
 
@@ -188,6 +190,38 @@ describe('OccupancyCubesVisualizer', () => {
     mesh.getMatrixAt(1, matrix);
     pos.setFromMatrixPosition(matrix);
     expect(pos.x).toBeCloseTo(2 * 0.15);
+
+    visualizer.dispose();
+  });
+
+  /**
+   * Why this test matters (port plan Iter 8 — RGB voxel coloring):
+   * When the grid carries a per-cell camera color, the cube must show it;
+   * cells without color (rgb option off, pre-Iter-8 recordings) must keep
+   * the height ramp. A regression here silently renders every voxel with
+   * the fallback, which looks plausible and would only be caught on-device.
+   */
+  it('uses the grid cell color when available, height ramp otherwise', () => {
+    const arSpaceNode = new THREE.Group();
+    const visualizer = new OccupancyCubesVisualizer(arSpaceNode);
+    const colored: GridCell = [0, 0, -1];
+    const uncolored: GridCell = [0, -10, 0]; // low → blue-ish ramp
+    visualizer.refresh(
+      makeGridSource([colored, uncolored], 0.15, (cell) =>
+        cell === colored ? ([51, 102, 255] as const) : null
+      )
+    );
+    const mesh = findMesh(arSpaceNode);
+
+    const rgb = new THREE.Color();
+    mesh.getColorAt(0, rgb);
+    expect(rgb.r).toBeCloseTo(51 / 255, 2);
+    expect(rgb.g).toBeCloseTo(102 / 255, 2);
+    expect(rgb.b).toBeCloseTo(1, 2);
+
+    const fallback = new THREE.Color();
+    mesh.getColorAt(1, fallback);
+    expect(fallback.b).toBeGreaterThan(fallback.r); // height ramp, not rgb
 
     visualizer.dispose();
   });

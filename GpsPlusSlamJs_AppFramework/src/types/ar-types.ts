@@ -55,6 +55,12 @@ export interface ARPose {
 }
 
 /**
+ * An sRGB color triple, 0–255 integers per channel. Kept as plain ints so
+ * persisted JSON stays compact (~3 bytes/point in practice).
+ */
+export type RgbTuple = readonly [number, number, number];
+
+/**
  * A single depth point sample from WebXR Depth API.
  * Used for 3D reconstruction and validating AR tracking accuracy.
  */
@@ -65,6 +71,14 @@ export interface DepthPoint {
   readonly screenY: number;
   /** Depth value in meters */
   readonly depthM: number;
+  /**
+   * Camera color at (screenX, screenY), sampled from the same XR frame as
+   * the depth read (occupancy-grid port plan Iter 8). Optional + additive:
+   * recordings made before 2026-06 (or with the RGB recording option off)
+   * carry no color; consumers must fall back (e.g. height-based cube
+   * coloring).
+   */
+  readonly rgb?: RgbTuple;
 }
 
 /**

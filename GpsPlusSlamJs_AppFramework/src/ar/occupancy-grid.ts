@@ -23,7 +23,7 @@
  */
 
 import type { Vector3 } from 'gps-plus-slam-js';
-import type { DepthSample } from '../types/ar-types';
+import type { DepthSample, RgbTuple } from '../types/ar-types';
 import { unprojectDepthPoint } from './depth-unprojection';
 import { bresenham3d, type GridCell } from './bresenham3d';
 
@@ -41,6 +41,14 @@ interface CellRecord {
   readonly cell: GridCell;
   /** Number of depth points observed in this cell. */
   count: number;
+  /**
+   * Number of observations that carried a color (≤ count — color-less
+   * observations from old recordings or with the rgb option off must not
+   * dilute the average toward black, Iter 8).
+   */
+  colorCount: number;
+  /** Per-channel sums of the colored observations (running average). */
+  colorSum: [number, number, number];
 }
 
 export class OccupancyGrid {
@@ -92,8 +100,9 @@ export class OccupancyGrid {
       return 0;
     }
     const cameraCell = this.cellForPosition(sample.cameraPos);
-    // Pass 1: carve free space along every ray, collecting endpoint cells.
-    const endpointCells: GridCell[] = [];
+    // Pass 1: carve free space along every ray, collecting endpoint cells
+    // (with the observing point's color, if any — Iter 8).
+    const endpoints: Array<{ cell: GridCell; rgb?: RgbTuple }> = [];
     for (const point of sample.points) {
       const world = unprojectDepthPoint(
         point,
@@ -108,13 +117,13 @@ export class OccupancyGrid {
       if (!cellsEqual(cameraCell, cell)) {
         this.carve(cameraCell, cell);
       }
-      endpointCells.push(cell);
+      endpoints.push({ cell, rgb: point.rgb });
     }
     // Pass 2: count endpoints occupied, after all carving for this sample.
-    for (const cell of endpointCells) {
-      this.increment(cell);
+    for (const endpoint of endpoints) {
+      this.increment(endpoint.cell, endpoint.rgb);
     }
-    return endpointCells.length;
+    return endpoints.length;
   }
 
   /** Occupied cells observed at least `minObservations` times (default 1). */
@@ -144,6 +153,26 @@ export class OccupancyGrid {
       cell[0] * this.cellSizeM,
       cell[1] * this.cellSizeM,
       cell[2] * this.cellSizeM,
+    ];
+  }
+
+  /**
+   * Running-average color of the cell's colored observations (Iter 8), or
+   * null when the cell is unknown or was only ever observed without color
+   * (rgb option off / pre-Iter-8 recordings) — consumers fall back to
+   * height-based coloring. Channels are rounded and clamped to 0–255.
+   */
+  getCellColor(cell: GridCell): RgbTuple | null {
+    const record = this.cells.get(cellKey(cell));
+    if (!record || record.colorCount === 0) {
+      return null;
+    }
+    const average = (sum: number): number =>
+      Math.min(255, Math.max(0, Math.round(sum / record.colorCount)));
+    return [
+      average(record.colorSum[0]),
+      average(record.colorSum[1]),
+      average(record.colorSum[2]),
     ];
   }
 
@@ -202,13 +231,21 @@ export class OccupancyGrid {
     );
   }
 
-  private increment(cell: GridCell): void {
+  private increment(cell: GridCell, rgb?: RgbTuple): void {
     const key = cellKey(cell);
-    const record = this.cells.get(key);
-    if (record) {
-      record.count++;
-    } else {
-      this.cells.set(key, { cell, count: 1 });
+    let record = this.cells.get(key);
+    if (!record) {
+      record = { cell, count: 0, colorCount: 0, colorSum: [0, 0, 0] };
+      this.cells.set(key, record);
+    }
+    record.count++;
+    // Only finite triples enter the average — bad persisted data degrades
+    // to a color-less observation instead of poisoning the cell.
+    if (rgb && isFiniteTriple(rgb)) {
+      record.colorCount++;
+      record.colorSum[0] += rgb[0];
+      record.colorSum[1] += rgb[1];
+      record.colorSum[2] += rgb[2];
     }
   }
 }
