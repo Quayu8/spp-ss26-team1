@@ -27,7 +27,9 @@ Plan: `GpsPlusSlamJs_Docs/docs/2026-06-11-depth-occupancy-grid-port-plan.md` §3
 
 ```ts
 const grid = new OccupancyGrid();
-const visualizer = new OccupancyCubesVisualizer(scene);
+// arWorldGroup, NOT the scene root — the cells are raw-WebXR coordinates
+// that must ride the alignment matrix (port plan Iter 7).
+const visualizer = new OccupancyCubesVisualizer(arWorldGroup);
 const dispose = wireOccupancyGridSubscribers({
   storeRef,
   grid,

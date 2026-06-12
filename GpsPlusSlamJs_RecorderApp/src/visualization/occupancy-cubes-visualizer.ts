@@ -11,16 +11,26 @@
  * Coloring: height-based per-instance color (HSL ramp over the cell's Y)
  * until per-point RGB capture lands (plan §5).
  *
- * Scene is injected explicitly (no `getScene()` call) so the class stays
- * unit-testable — same P3 rule as `FrameTileVisualizer`.
+ * Coordinate space: the grid's cells are **raw WebXR** coordinates, but
+ * the AR-space node (`arWorldGroup`) they must ride lives in AR-odometry
+ * NUE. The mesh therefore carries the constant `WEBXR_TO_NUE` basis
+ * change as its own local matrix — the same role `basisChangeNode` plays
+ * for the camera — so every cube's world pose follows the camera's
+ * `alignment × WEBXR_TO_NUE` chain (see the hit-test-reticle entry in
+ * `GpsPlusSlamJs_Docs/docs/lessons-learned.md`). Parenting the mesh at
+ * the scene root instead leaves the cubes axis-swapped and unaligned.
+ *
+ * The parent node is injected explicitly (no `getArWorldGroup()` call)
+ * so the class stays unit-testable — same P3 rule as
+ * `FrameTileVisualizer`.
  */
 
 import * as THREE from 'three';
 import type { GridCell } from 'gps-plus-slam-app-framework/ar';
+import { WEBXR_TO_NUE } from 'gps-plus-slam-app-framework/ar/webxr-nue-basis';
 
 /** The read surface of the framework's `OccupancyGrid` this class draws. */
 export interface OccupancyGridSource {
-  readonly cellSizeM: number;
   getOccupiedCells(minObservations?: number): readonly GridCell[];
   getCellCenter(cell: GridCell): readonly [number, number, number];
 }
@@ -34,6 +44,12 @@ export interface OccupancyCubesVisualizerOptions {
    */
   readonly minObservations?: number;
   /**
+   * Rendered edge length of each debug cube in meters. Deliberately
+   * smaller than the grid cell (0.15 m) so individual voxels stay
+   * readable instead of fusing into a solid wall. Default 0.1.
+   */
+  readonly cubeSizeM?: number;
+  /**
    * Random source for the over-cap subset selection. Injected so tests
    * are deterministic. Default `Math.random`.
    */
@@ -41,6 +57,7 @@ export interface OccupancyCubesVisualizerOptions {
 }
 
 const DEFAULT_MAX_INSTANCES = 2000;
+const DEFAULT_CUBE_SIZE_M = 0.1;
 const MESH_NAME = 'occupancy-cubes';
 
 /** Height range mapped onto the color ramp (meters, raw WebXR Y). */
@@ -48,20 +65,27 @@ const COLOR_Y_MIN = -1;
 const COLOR_Y_MAX = 3;
 
 export class OccupancyCubesVisualizer {
-  private readonly scene: THREE.Scene;
+  private readonly arSpaceNode: THREE.Object3D;
   private readonly minObservations: number;
+  private readonly cubeSizeM: number;
   private readonly rng: () => number;
   private readonly mesh: THREE.InstancedMesh;
   private readonly geometry: THREE.BoxGeometry;
   private readonly material: THREE.MeshBasicMaterial;
   private disposed = false;
 
+  /**
+   * @param arSpaceNode - the node whose local space is AR-odometry NUE
+   *   and which receives the alignment matrix (`arWorldGroup` live,
+   *   `replaySceneState.arWorldGroup` in replay) — NOT the scene root.
+   */
   constructor(
-    scene: THREE.Scene,
+    arSpaceNode: THREE.Object3D,
     options: OccupancyCubesVisualizerOptions = {}
   ) {
-    this.scene = scene;
+    this.arSpaceNode = arSpaceNode;
     this.minObservations = options.minObservations ?? 1;
+    this.cubeSizeM = options.cubeSizeM ?? DEFAULT_CUBE_SIZE_M;
     this.rng = options.rng ?? Math.random;
     const maxInstances = options.maxInstances ?? DEFAULT_MAX_INSTANCES;
 
@@ -79,7 +103,11 @@ export class OccupancyCubesVisualizer {
     this.mesh.name = MESH_NAME;
     this.mesh.count = 0;
     this.mesh.frustumCulled = false; // instances spread across the room
-    this.scene.add(this.mesh);
+    // Instances stay raw WebXR; the mesh node itself converts to the
+    // parent's NUE frame (mirrors webxr-session's basisChangeNode).
+    this.mesh.matrixAutoUpdate = false;
+    this.mesh.matrix.copy(WEBXR_TO_NUE);
+    this.arSpaceNode.add(this.mesh);
   }
 
   /** Number of cubes currently drawn. */
@@ -106,7 +134,7 @@ export class OccupancyCubesVisualizer {
       const cell = cells[i];
       if (cell === undefined) continue;
       const [x, y, z] = grid.getCellCenter(cell);
-      matrix.makeScale(grid.cellSizeM, grid.cellSizeM, grid.cellSizeM);
+      matrix.makeScale(this.cubeSizeM, this.cubeSizeM, this.cubeSizeM);
       matrix.setPosition(x, y, z);
       this.mesh.setMatrixAt(i, matrix);
       this.mesh.setColorAt(i, heightColor(color, y));
@@ -123,11 +151,11 @@ export class OccupancyCubesVisualizer {
     this.mesh.count = 0;
   }
 
-  /** Remove the mesh from the scene and release GPU resources. */
+  /** Remove the mesh from its parent and release GPU resources. */
   dispose(): void {
     if (this.disposed) return;
     this.disposed = true;
-    this.scene.remove(this.mesh);
+    this.arSpaceNode.remove(this.mesh);
     this.mesh.dispose(); // releases the instance buffers
     this.geometry.dispose();
     this.material.dispose();

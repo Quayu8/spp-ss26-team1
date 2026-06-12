@@ -40,7 +40,10 @@ This module is the entry point that runs on page load. It also exports the follo
   each wired after `initAR` inside their own `try/catch` — a failure logs a
   warning and recording continues without that layer. Both are torn down in
   `resetMainState()` (unsubscribe + dispose; the occupancy grid itself is a
-  plain in-memory structure dropped with its reference).
+  plain in-memory structure dropped with its reference). The cube visualizer
+  is parented under `arWorldGroup` (NOT the scene root): the grid's cells are
+  raw-WebXR coordinates that must ride the alignment matrix like the camera
+  (port plan Iter 7 reparenting fix).
 
 ## Examples
 

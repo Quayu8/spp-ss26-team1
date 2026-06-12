@@ -1011,11 +1011,13 @@ async function handleEnterAR(): Promise<void> {
       }
 
       // Occupancy-grid cubes — voxelized depth geometry in the live AR
-      // scene (port plan Iter 5). Best-effort: failures must not break
-      // the AR session.
+      // scene (port plan Iter 5). The cells are raw-WebXR coordinates, so
+      // the visualizer hangs off arWorldGroup (NOT the scene root) and
+      // rides the alignment like the camera does (Iter 7 reparenting fix).
+      // Best-effort: failures must not break the AR session.
       try {
         occupancyGrid = new OccupancyGrid();
-        occupancyCubesVisualizer = new OccupancyCubesVisualizer(arScene);
+        occupancyCubesVisualizer = new OccupancyCubesVisualizer(arWorldGroup);
         unsubscribeOccupancyGrid = wireOccupancyGridSubscribers({
           storeRef,
           grid: occupancyGrid,

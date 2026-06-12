@@ -438,12 +438,17 @@ describe('Occupancy-grid cube wiring in live AR', () => {
     `;
   });
 
-  it('creates the grid + cube visualizer on the AR scene and wires them after AR init', async () => {
+  it('creates the grid + cube visualizer on the AR world group and wires them after AR init', async () => {
     await handleEnterARForTesting();
 
     expect(mockOccupancyGridCtor).toHaveBeenCalledTimes(1);
     expect(mockVisualizerCtor).toHaveBeenCalledTimes(1);
-    expect(mockVisualizerCtor).toHaveBeenCalledWith(mockGetScene());
+    // The visualizer must hang off arWorldGroup, NOT the scene root: the
+    // grid's cells are raw-WebXR coordinates that only register with the
+    // real world when they ride the alignment matrix like the camera does
+    // (port plan Iter 7 reparenting fix).
+    expect(mockVisualizerCtor).toHaveBeenCalledWith(mockGetArWorldGroup());
+    expect(mockVisualizerCtor).not.toHaveBeenCalledWith(mockGetScene());
     expect(mockWireOccupancyGridSubscribers).toHaveBeenCalledTimes(1);
 
     const options = mockWireOccupancyGridSubscribers.mock.calls[0]?.[0] as {
@@ -467,6 +472,15 @@ describe('Occupancy-grid cube wiring in live AR', () => {
 
   it('skips the wiring when the AR scene is unavailable', async () => {
     mockGetScene.mockReturnValueOnce(null);
+
+    await handleEnterARForTesting();
+
+    expect(mockVisualizerCtor).not.toHaveBeenCalled();
+    expect(mockWireOccupancyGridSubscribers).not.toHaveBeenCalled();
+  });
+
+  it('skips the wiring when the AR world group is unavailable', async () => {
+    mockGetArWorldGroup.mockReturnValueOnce(null);
 
     await handleEnterARForTesting();
 

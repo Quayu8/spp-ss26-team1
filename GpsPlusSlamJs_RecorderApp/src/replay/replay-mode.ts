@@ -167,15 +167,18 @@ export async function startReplayMode(
 
   // Occupancy-grid cubes — recordDepthSample actions re-dispatched during
   // replay rebuild the voxel grid in the replay scene (port plan Iter 5).
-  // Recordings made before intrinsics capture carry no projectionMatrix,
-  // so their samples are skipped and the grid simply stays empty; replay
-  // continues normally. Best-effort like the frame tiles above.
+  // The cells are raw-WebXR coordinates, so the visualizer hangs off
+  // arWorldGroup (NOT the scene root) and rides the alignment like the
+  // recorded camera path (Iter 7 reparenting fix). Recordings made before
+  // intrinsics capture carry no projectionMatrix, so their samples are
+  // skipped and the grid simply stays empty; replay continues normally.
+  // Best-effort like the frame tiles above.
   let unsubscribeOccupancyGrid: (() => void) | null = null;
   let occupancyCubesVisualizer: OccupancyCubesVisualizer | null = null;
   try {
     const occupancyGrid = new OccupancyGrid();
     occupancyCubesVisualizer = new OccupancyCubesVisualizer(
-      replaySceneState.scene
+      replaySceneState.arWorldGroup
     );
     unsubscribeOccupancyGrid = wireOccupancyGridSubscribers({
       storeRef: createStoreRef(store),
