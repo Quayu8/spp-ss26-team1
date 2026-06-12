@@ -992,6 +992,16 @@ async function handleEnterAR(): Promise<void> {
       // the same listener+visualizer stack as replay. Best-effort: failures
       // must not break the AR session.
       try {
+        // Dispose any frame-tile wiring left over from a prior enter-AR
+        // cycle (handleEnterAR runs again on back-to-setup → Enter AR).
+        // Without this the old storeRef subscriber stays attached and the
+        // previous visualizer's GPU textures are orphaned — same leak class
+        // as the tracking-quality subscription disposed below.
+        unsubscribeFrameTiles?.();
+        unsubscribeFrameTiles = null;
+        frameTileVisualizer?.dispose();
+        frameTileVisualizer = null;
+
         frameTileVisualizer = new FrameTileVisualizer(arScene);
         unsubscribeFrameTiles = wireFrameTileSubscribers({
           storeRef,
@@ -1016,6 +1026,18 @@ async function handleEnterAR(): Promise<void> {
       // rides the alignment like the camera does (Iter 7 reparenting fix).
       // Best-effort: failures must not break the AR session.
       try {
+        // Dispose any occupancy-grid wiring left over from a prior enter-AR
+        // cycle (handleEnterAR runs again on back-to-setup → Enter AR).
+        // Without this the old storeRef swap-listener stays attached forever
+        // and the previous visualizer's instanced-mesh GPU resources are
+        // orphaned — same leak class as the tracking-quality subscription
+        // disposed below. The grid is a plain data structure (no dispose).
+        unsubscribeOccupancyGrid?.();
+        unsubscribeOccupancyGrid = null;
+        occupancyCubesVisualizer?.dispose();
+        occupancyCubesVisualizer = null;
+        occupancyGrid = null;
+
         occupancyGrid = new OccupancyGrid();
         occupancyCubesVisualizer = new OccupancyCubesVisualizer(arWorldGroup);
         unsubscribeOccupancyGrid = wireOccupancyGridSubscribers({

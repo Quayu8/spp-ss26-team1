@@ -40,7 +40,14 @@ This module is the entry point that runs on page load. It also exports the follo
   each wired after `initAR` inside their own `try/catch` — a failure logs a
   warning and recording continues without that layer. Both are torn down in
   `resetMainState()` (unsubscribe + dispose; the occupancy grid itself is a
-  plain in-memory structure dropped with its reference). The cube visualizer
+  plain in-memory structure dropped with its reference). **They are also
+  disposed on re-entry**: `handleEnterAR` runs again on every "back to setup →
+  Enter AR" cycle and `onBackToSetup` performs no teardown, so each block first
+  disposes-and-nulls its prior subscriber + visualizer before constructing new
+  ones — otherwise the orphaned `storeRef` swap-listener (registered by
+  `wireOccupancyGridSubscribers`) and the previous visualizer's GPU resources
+  would leak (same leak class the tracking-quality subscription guards inline).
+  The cube visualizer
   is parented under `arWorldGroup` (NOT the scene root): the grid's cells are
   raw-WebXR coordinates that must ride the alignment matrix like the camera
   (port plan Iter 7 reparenting fix).

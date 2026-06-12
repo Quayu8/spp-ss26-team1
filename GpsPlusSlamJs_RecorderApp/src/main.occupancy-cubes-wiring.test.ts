@@ -470,6 +470,35 @@ describe('Occupancy-grid cube wiring in live AR', () => {
     expect(mockVisualizerInstance.dispose).toHaveBeenCalledTimes(1);
   });
 
+  /**
+   * Why this test matters (re-entry leak guard): handleEnterAR runs again
+   * whenever the user goes back to setup and taps Enter AR a second time
+   * (main.ts documents this; onBackToSetup does NO teardown, and the only
+   * production teardown — resetMainState — is test-only). Each cycle calls
+   * wireOccupancyGridSubscribers, which registers a *persistent* storeRef
+   * swap-listener plus a store subscription and allocates an instanced-mesh
+   * visualizer. If the prior cycle's wiring is not disposed before the new
+   * instances are created, the old swap-listener stays attached to storeRef
+   * forever (keeps refreshing a discarded visualizer) and the old GPU mesh
+   * leaks — the same defect the tracking-quality subscription guards against.
+   */
+  it('disposes the prior cycle wiring + visualizer when handleEnterAR re-enters', async () => {
+    await handleEnterARForTesting();
+    expect(occupancyGridDisposers).toHaveLength(1);
+    expect(occupancyGridDisposers[0]).not.toHaveBeenCalled();
+    expect(mockVisualizerInstance.dispose).not.toHaveBeenCalled();
+
+    // Second enter-AR cycle (back to setup → Enter AR again).
+    await handleEnterARForTesting();
+
+    // The first cycle's subscriber and visualizer must be torn down before
+    // the second cycle's instances are wired.
+    expect(occupancyGridDisposers[0]).toHaveBeenCalledTimes(1);
+    expect(mockVisualizerInstance.dispose).toHaveBeenCalledTimes(1);
+    expect(mockWireOccupancyGridSubscribers).toHaveBeenCalledTimes(2);
+    expect(occupancyGridDisposers).toHaveLength(2);
+  });
+
   it('skips the wiring when the AR scene is unavailable', async () => {
     mockGetScene.mockReturnValueOnce(null);
 
