@@ -48,10 +48,9 @@ export function unprojectDepthPoint(
   }
 
   const { screenX, screenY, depthM } = point;
-  const proj = mat4.fromValues(
-    ...(projectionMatrix as Parameters<typeof mat4.fromValues>)
-  );
-  const invProj = mat4.invert(mat4.create(), proj);
+  // `Matrix4` is structurally a ReadonlyMat4, so it can be passed straight to
+  // `invert` (which only reads its source) — no copy or cast needed.
+  const invProj = mat4.invert(mat4.create(), projectionMatrix);
   if (!invProj) {
     return null; // singular matrix
   }
