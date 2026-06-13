@@ -4,10 +4,11 @@
 
 3D-scene visualizer for captured camera frames. Each entry surfaced
 by the framework's `selectFrameTilesInWebXR` selector (one per
-accepted `gpsData/add2dImage` action) becomes a textured square in
+accepted `gpsData/add2dImage` action) becomes a textured plane in
 the WebXR scene, anchored at the WebXR pose recorded at capture
-time. (Step 5.7a-2 deleted the legacy `framesInScene` mirror — the
-selector is now the sole source.)
+time and sized to the frame's true aspect ratio. (Step 5.7a-2 deleted
+the legacy `framesInScene` mirror — the selector is now the sole
+source.)
 
 Part of F3 of
 [2026-05-26-tracking-quality-regression-and-replay-gaps-user-feedback.md](../../../../gps-plus-slam/GpsPlusSlamJs_Docs/docs/2026-05-26-tracking-quality-regression-and-replay-gaps-user-feedback.md).
@@ -37,6 +38,18 @@ class FrameTileVisualizer {
   `OccupancyCubesVisualizer`.
 - **Shared geometry** — one `PlaneGeometry(1, 1)` at module scope,
   reused by every tile. Per-tile size comes from `mesh.scale`.
+- **Aspect-correct sizing (Finding 1 / D1 of
+  [2026-06-13-frame-tile-rendering-bugs-user-feedback.md](../../../../gps-plus-slam/GpsPlusSlamJs_Docs/docs/2026-06-13-frame-tile-rendering-bugs-user-feedback.md)).**
+  The shared geometry is square, so a non-square JPEG would be **stretched**
+  if scaled uniformly. `addTile` instead scales **non-uniformly** from the
+  frame's persisted `width`/`height`: the **longer** edge = `sizeMeters`, the
+  shorter edge = `sizeMeters × shorter/longer` (`tileScaleXY`). A frame with
+  missing or non-positive dimensions (legacy recordings) falls back to a
+  square `sizeMeters × sizeMeters` tile. Z scale is cosmetic (the plane lies
+  in XY) and left at `sizeMeters`. This replaces the earlier — incorrect —
+  claim that "texture aspect ratio is preserved by the texture's own
+  coordinates": a `THREE.Texture` maps its `[0,1]` UVs across the whole plane,
+  so nothing preserves aspect; the geometry footprint must carry it.
 - **Per-tile material + texture** — captured frames cannot share a
   texture, so each tile owns its `MeshBasicMaterial({ map: texture })`.
   Materials and textures are disposed by `clear()` / `dispose()`. The

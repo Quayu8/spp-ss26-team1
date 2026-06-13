@@ -30,6 +30,8 @@ function makeFrame(overrides: Partial<ArImageCapture> = {}): ArImageCapture {
     rotation: overrides.rotation ?? [0, 0, 0, 1],
     screenRotation: overrides.screenRotation ?? 0,
     capturedAt: overrides.capturedAt,
+    width: overrides.width,
+    height: overrides.height,
   };
 }
 
@@ -159,6 +161,56 @@ describe('FrameTileVisualizer', () => {
     viz.addTile(makeFrame(), texture);
     const mesh = findTile(arSpaceNode, 'frames/frame-000001.jpg');
     expect(mesh.scale.toArray()).toEqual([0.5, 0.5, 0.5]);
+  });
+
+  // Why (Finding 1 / D1 of 2026-06-13-frame-tile-rendering-bugs-user-feedback.md):
+  // the raw JPEGs are captured at the camera aspect ratio (non-square), but
+  // tiles were rendered on a hardcoded square plane, stretching the texture.
+  // With persisted width/height the tile must be scaled non-uniformly so its
+  // footprint matches the image shape — the LONGER edge equals sizeMeters so
+  // wide frames never balloon.
+  it('scales a LANDSCAPE frame so the wide edge = sizeMeters and height shrinks by aspect', () => {
+    const viz = new FrameTileVisualizer(arSpaceNode, { sizeMeters: 0.2 });
+    // 1920×1080 → aspect 16:9 ≈ 1.7778 (landscape)
+    viz.addTile(makeFrame({ width: 1920, height: 1080 }), texture);
+    const mesh = findTile(arSpaceNode, 'frames/frame-000001.jpg');
+    const [x, y, z] = mesh.scale.toArray();
+    expect(x).toBeCloseTo(0.2); // wide edge = sizeMeters
+    expect(y).toBeCloseTo(0.2 * (1080 / 1920)); // 0.1125
+    expect(z).toBeCloseTo(0.2);
+    // The tile footprint reproduces the image aspect ratio.
+    expect(x / y).toBeCloseTo(1920 / 1080);
+    // Longer edge never exceeds sizeMeters.
+    expect(Math.max(x, y)).toBeCloseTo(0.2);
+  });
+
+  it('scales a PORTRAIT frame so the tall edge = sizeMeters and width shrinks by aspect', () => {
+    const viz = new FrameTileVisualizer(arSpaceNode, { sizeMeters: 0.2 });
+    // 1080×1920 → portrait
+    viz.addTile(makeFrame({ width: 1080, height: 1920 }), texture);
+    const mesh = findTile(arSpaceNode, 'frames/frame-000001.jpg');
+    const [x, y] = mesh.scale.toArray();
+    expect(y).toBeCloseTo(0.2); // tall edge = sizeMeters
+    expect(x).toBeCloseTo(0.2 * (1080 / 1920)); // 0.1125
+    expect(y / x).toBeCloseTo(1920 / 1080);
+    expect(Math.max(x, y)).toBeCloseTo(0.2);
+  });
+
+  // Why: legacy recordings (and any frame missing/with degenerate dimensions)
+  // must not crash or distort — they fall back to the original square tile.
+  it('falls back to a square tile when width/height are absent or non-positive', () => {
+    const viz = new FrameTileVisualizer(arSpaceNode, { sizeMeters: 0.2 });
+    viz.addTile(makeFrame({ imageFile: 'frames/legacy.jpg' }), texture); // no dims
+    viz.addTile(
+      makeFrame({ imageFile: 'frames/zero.jpg', width: 0, height: 1080 }),
+      texture
+    );
+    expect(findTile(arSpaceNode, 'frames/legacy.jpg').scale.toArray()).toEqual([
+      0.2, 0.2, 0.2,
+    ]);
+    expect(findTile(arSpaceNode, 'frames/zero.jpg').scale.toArray()).toEqual([
+      0.2, 0.2, 0.2,
+    ]);
   });
 
   // Why: the slice is append-only; a duplicate dispatch must not

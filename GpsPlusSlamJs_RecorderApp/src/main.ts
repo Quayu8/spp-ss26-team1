@@ -1182,6 +1182,12 @@ function handleImageCaptured(image: CapturedImage): void {
       ],
       screenRotation: image.screenRotation,
       capturedAt: image.timestamp,
+      // Persist the encoded pixel dimensions so the frame-tile visualizer can
+      // render each tile at its true aspect ratio (D1 of the 2026-06-13
+      // frame-tile feedback). Field-by-field rebuild per the payload-rebuild
+      // field-drop audit — undefined for captures that lack dimensions.
+      width: image.width,
+      height: image.height,
     })
   );
 

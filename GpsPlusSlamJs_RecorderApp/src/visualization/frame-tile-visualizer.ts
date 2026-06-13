@@ -59,11 +59,14 @@ const SHARED_GEOMETRY = new THREE.PlaneGeometry(1, 1);
 
 export interface FrameTileVisualizerOptions {
   /**
-   * Edge length of the textured plane in meters. Tiles are square at
-   * the configured size; texture aspect ratio is preserved by the
-   * texture's own coordinates, not by the geometry. Defaults to 0.2 m
-   * (20 cm) — visible without dominating the scene at typical
-   * walking-pace capture cadence.
+   * Length of the tile's **longer** edge in meters. The shared unit
+   * `PlaneGeometry(1, 1)` is scaled **non-uniformly** to the frame's
+   * `width`/`height` aspect ratio so the tile footprint matches the true
+   * image shape (the longer edge equals this value, the shorter edge is
+   * `sizeMeters × shorter/longer`). Frames without persisted dimensions
+   * (legacy recordings) fall back to a square `sizeMeters × sizeMeters`
+   * tile. Defaults to 0.2 m (20 cm) — visible without dominating the scene
+   * at typical walking-pace capture cadence.
    */
   readonly sizeMeters?: number;
 }
@@ -126,7 +129,15 @@ export class FrameTileVisualizer {
       depthTest: true,
     });
     const mesh = new THREE.Mesh(SHARED_GEOMETRY, material);
-    mesh.scale.setScalar(this.sizeMeters);
+    // Non-uniform scale to the frame's aspect ratio so a non-square JPEG is
+    // not stretched onto a square plane (Finding 1 / D1). The longer edge is
+    // sizeMeters; a frame without persisted dimensions falls back to square.
+    const { x: scaleX, y: scaleY } = tileScaleXY(
+      this.sizeMeters,
+      frame.width,
+      frame.height
+    );
+    mesh.scale.set(scaleX, scaleY, this.sizeMeters);
     mesh.name = `${NAME_PREFIX}-${frame.imageFile}`;
     mesh.position.set(frame.position[0], frame.position[1], frame.position[2]);
     mesh.quaternion.set(
@@ -169,6 +180,29 @@ export class FrameTileVisualizer {
   getCount(): number {
     return this.tiles.size;
   }
+}
+
+/**
+ * Per-tile X/Y scale for the shared unit plane so the tile reproduces the
+ * source image's aspect ratio. The longer edge is `sizeMeters`; the shorter
+ * edge is scaled down by the aspect ratio. Falls back to a square
+ * (`sizeMeters × sizeMeters`) when dimensions are missing or non-positive
+ * (legacy recordings / degenerate input) so a tile can never collapse or
+ * distort. Z is handled by the caller (the plane lies in XY; Z scale is
+ * cosmetic).
+ */
+function tileScaleXY(
+  sizeMeters: number,
+  width: number | undefined,
+  height: number | undefined
+): { x: number; y: number } {
+  if (!width || !height || width <= 0 || height <= 0) {
+    return { x: sizeMeters, y: sizeMeters };
+  }
+  const aspect = width / height;
+  return aspect >= 1
+    ? { x: sizeMeters, y: sizeMeters / aspect } // landscape: width is the long edge
+    : { x: sizeMeters * aspect, y: sizeMeters }; // portrait: height is the long edge
 }
 
 function disposeTileMaterial(mesh: THREE.Mesh): void {
