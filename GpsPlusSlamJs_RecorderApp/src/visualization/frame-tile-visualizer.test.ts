@@ -206,6 +206,40 @@ describe('FrameTileVisualizer', () => {
     expect(findTile(arSpaceNode, 'frames/after-clear.jpg').parent).toBe(basis);
   });
 
+  // Why (D2 geometry-elimination — 2026-06-13 upside-down report): the user
+  // reported tiles render *vertically flipped* while the raw JPEG on disk is
+  // upright (not mirrored, not 90°). The leading cause is the
+  // `ImageBitmap`/`THREE.Texture` `flipY` gotcha at the DECODE step, but a
+  // competing cause is the geometry/basis chain producing a plane whose "up"
+  // points down. This test EXONERATES the geometry path so the fix can land at
+  // decode with confidence: for an upright capture (identity rotation,
+  // screenRotation = 0 — the configuration of the reported frames), the tile's
+  // local +Y must map to world +Y through the `WEBXR_TO_NUE` basis chain. If it
+  // did NOT (e.g. mapped to -Y), the upside-down would be geometric and a
+  // texture-only flip would be wrong. It maps to +Y here, so the remaining flip
+  // is purely texture-space. (Headless jsdom cannot rasterise the actual flip —
+  // see the parent doc's Finding 2 feasibility caveat — so we assert the
+  // transform, not pixels.)
+  it('geometry has no vertical flip: an upright capture maps local +Y to world +Y (D2 elimination)', () => {
+    const viz = new FrameTileVisualizer(arSpaceNode);
+    viz.addTile(
+      // Identity rotation + screenRotation 0 = the reported frames' config.
+      makeFrame({ rotation: [0, 0, 0, 1], screenRotation: 0 }),
+      texture
+    );
+    arSpaceNode.updateMatrixWorld(true);
+
+    const mesh = findTile(arSpaceNode, 'frames/frame-000001.jpg');
+    const worldUp = new THREE.Vector3(0, 1, 0).transformDirection(
+      mesh.matrixWorld
+    );
+    // +Y, not -Y: the plane is upright. The reported flip is therefore in the
+    // texture-upload path (decoder), not the geometry — driving Option 2-A.
+    expect(worldUp.x).toBeCloseTo(0);
+    expect(worldUp.y).toBeCloseTo(1);
+    expect(worldUp.z).toBeCloseTo(0);
+  });
+
   // Why: dispose is the end-of-life path; unlike clear() it also detaches
   // the basis node so re-entering AR doesn't leak an empty group on
   // arWorldGroup each cycle.
