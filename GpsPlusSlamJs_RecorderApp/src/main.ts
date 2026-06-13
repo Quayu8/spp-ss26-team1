@@ -1002,7 +1002,10 @@ async function handleEnterAR(): Promise<void> {
         frameTileVisualizer?.dispose();
         frameTileVisualizer = null;
 
-        frameTileVisualizer = new FrameTileVisualizer(arScene);
+        // Parent under arWorldGroup (NOT the scene root): the selector
+        // emits raw-WebXR poses, so tiles must ride the camera's
+        // alignment × WEBXR_TO_NUE chain. See the followup frame-check doc.
+        frameTileVisualizer = new FrameTileVisualizer(arWorldGroup);
         unsubscribeFrameTiles = wireFrameTileSubscribers({
           storeRef,
           visualizer: frameTileVisualizer,
