@@ -6,9 +6,24 @@ import * as THREE from 'three';
  * one another when multiple targets are active in the same frame.
  */
 export class ARWayfindingHUD {
-    constructor(scene, camera, hudDistance = 2.5) {
+    constructor(scene, camera, config) {
+
+        // Fail fast: enforce explicit configuration to prevent unintended behavior
+        if (!config || typeof config.distanceMin === 'undefined' || typeof config.distanceMax === 'undefined') {
+            throw new Error(
+                "ARWayfindingHUD initialization failed: A configuration object containing " +
+                "'distanceMin' and 'distanceMax' is strictly required to define the spatial hysteresis."
+            );
+        }
+
         this.camera = camera;
-        this.hudDistance = hudDistance;
+        // Map the enforced configuration variables
+        this.distanceMin = config.distanceMin;
+        this.distanceMax = config.distanceMax;
+        
+        // HUD distance remains optional as it is purely visual, falling back to 2.5m
+        this.hudDistance = config.hudDistance !== undefined ? config.hudDistance : 2.5;
+
         this.targetStates = [];
 
         // Bind HUD to the camera transform to keep indicators in view space.

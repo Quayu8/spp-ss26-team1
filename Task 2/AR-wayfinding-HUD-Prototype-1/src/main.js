@@ -37,8 +37,15 @@ dummyTargets.forEach((pos, index) => {
     scene.add(sphere);
 });
 
-// Initialize the HUD component
-const hud = new ARWayfindingHUD(scene, camera);
+// Initialization in main.js
+// The developer is now forced to actively decide the operating distances
+const hudConfig = {
+    distanceMin: 18.0,
+    distanceMax: 20.0,
+    hudDistance: 2.5 // This one is optional and could be left out
+};
+
+const hud = new ARWayfindingHUD(scene, camera, hudConfig);
 
 // Handle viewport resizing
 window.addEventListener('resize', () => {
