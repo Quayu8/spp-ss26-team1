@@ -16,8 +16,35 @@ document.body.appendChild(renderer.domElement);
 const controls = new OrbitControls(camera, renderer.domElement);
 controls.enableDamping = false;
 
+// Fix OrbitControls to behave like a first-person perspective
+// by placing the target slightly in front of the camera lens.
 controls.target.set(0, 1.6, 4.99);
 controls.update();
+
+// Keyboard state tracking for locomotion
+const keysPressed = {
+    w: false,
+    a: false,
+    s: false,
+    d: false,
+    ArrowUp: false,
+    ArrowDown: false,
+    ArrowLeft: false,
+    ArrowRight: false
+};
+
+// Event listeners to capture keyboard input
+window.addEventListener('keydown', (e) => {
+    if (e.key in keysPressed) {
+        keysPressed[e.key] = true;
+    }
+});
+
+window.addEventListener('keyup', (e) => {
+    if (e.key in keysPressed) {
+        keysPressed[e.key] = false;
+    }
+});
 
 // Grid helper for spatial orientation
 const gridHelper = new THREE.GridHelper(50, 50);
@@ -41,11 +68,10 @@ dummyTargets.forEach((pos, index) => {
 });
 
 // Initialization of the AR Wayfinding HUD
-// The developer is forced to actively decide the operating distances
 const hudConfig = {
     distanceMin: 18.0,
     distanceMax: 20.0,
-    hudDistance: 2.5 // Optional visual distance
+    hudDistance: 2.5 
 };
 
 const hud = new ARWayfindingHUD(scene, camera, hudConfig);
@@ -57,12 +83,54 @@ window.addEventListener('resize', () => {
     renderer.setSize(window.innerWidth, window.innerHeight);
 });
 
+// Movement parameters
+const moveSpeed = 0.1;
+const moveVector = new THREE.Vector3();
+
 // Render loop
 function animate() {
     requestAnimationFrame(animate);
+
+    // Reset movement vector for the current frame
+    moveVector.set(0, 0, 0);
+
+    // Calculate forward direction projected onto the horizontal XZ-plane
+    const forward = new THREE.Vector3(0, 0, -1).applyQuaternion(camera.quaternion);
+    forward.y = 0;
+    forward.normalize();
+
+    // Calculate right direction projected onto the horizontal XZ-plane
+    const right = new THREE.Vector3(1, 0, 0).applyQuaternion(camera.quaternion);
+    right.y = 0;
+    right.normalize();
+
+    // Accumulate directional inputs
+    if (keysPressed.w || keysPressed.ArrowUp) {
+        moveVector.add(forward);
+    }
+    if (keysPressed.s || keysPressed.ArrowDown) {
+        moveVector.addScaledVector(forward, -1);
+    }
+    if (keysPressed.d || keysPressed.ArrowRight) {
+        moveVector.add(right);
+    }
+    if (keysPressed.a || keysPressed.ArrowLeft) {
+        moveVector.addScaledVector(right, -1);
+    }
+
+    // Apply translation if any movement key is active
+    if (moveVector.lengthSq() > 0) {
+        moveVector.normalize().multiplyScalar(moveSpeed);
+        
+        // Move both camera and orbit target synchronously to maintain looking direction
+        camera.position.add(moveVector);
+        controls.target.add(moveVector);
+    }
+
+    // Update controls after shifting the target position
     controls.update();
 
-    // Update one HUD indicator per target.
+    // Update HUD indicators per target
     hud.update(dummyTargets);
 
     renderer.render(scene, camera);
