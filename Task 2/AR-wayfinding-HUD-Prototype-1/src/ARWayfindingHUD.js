@@ -44,8 +44,7 @@ export class ARWayfindingHUD {
         mesh.visible = false;
         return mesh;
     }
-
-    /**
+/**
      * Evaluates spatial data and updates UI state.
      * @param {THREE.Vector3} targetWorldPos 
      */
@@ -63,34 +62,48 @@ export class ARWayfindingHUD {
         const distance = this.camera.position.distanceTo(targetWorldPos);
 
         // Hysteresis constants
-        const DISTANCE_MAX = 20.0; // Scaled down for desktop testing
+        const DISTANCE_MAX = 20.0;
         const DISTANCE_MIN = 18.0;
+        const NDC_VOLUMETRIC_THRESHOLD = 1.15;
 
-        // Determine visibility bounds
-        const onScreen = !isBehind && Math.abs(ndc.x) <= 0.8 && Math.abs(ndc.y) <= 0.8;
+        // Determine visibility bounds including volumetric geometry approximation
+        const onScreen = !isBehind && 
+                         Math.abs(ndc.x) <= NDC_VOLUMETRIC_THRESHOLD && 
+                         Math.abs(ndc.y) <= NDC_VOLUMETRIC_THRESHOLD;
 
-        // State Machine Evaluation
-        if (onScreen && distance < DISTANCE_MIN) {
-            this.currentState = 'hidden';
-            this.arrowMesh.visible = false;
-            this.circleMesh.visible = false;
-            return;
-        }
+        // --- 1. ON-SCREEN LOGIC ---
+        if (onScreen) {
+            // Evaluate Hysteresis State
+            if (distance < DISTANCE_MIN) {
+                this.currentState = 'hidden';
+            } else if (distance >= DISTANCE_MAX) {
+                this.currentState = 'circle';
+            } else if (this.currentState === 'arrow') {
+                // If it enters the screen exactly inside the deadband (18-20m),
+                // we need a valid on-screen default. We default to 'hidden'.
+                this.currentState = 'hidden';
+            }
 
-        if (onScreen && (distance >= DISTANCE_MAX || this.currentState === 'circle')) {
-            this.currentState = 'circle';
-            this.arrowMesh.visible = false;
-            this.circleMesh.visible = true;
+            // Apply Visuals based on the resolved state
+            if (this.currentState === 'hidden') {
+                this.arrowMesh.visible = false;
+                this.circleMesh.visible = false;
+            } else if (this.currentState === 'circle') {
+                this.arrowMesh.visible = false;
+                this.circleMesh.visible = true;
+                
+                this.circleMesh.position.set(
+                    Math.max(-1, Math.min(1, ndc.x)) * (frustumWidth / 2), 
+                    Math.max(-1, Math.min(1, ndc.y)) * (frustumHeight / 2), 
+                    -this.hudDistance
+                );
+            }
             
-            this.circleMesh.position.set(
-                ndc.x * (frustumWidth / 2), 
-                ndc.y * (frustumHeight / 2), 
-                -this.hudDistance
-            );
-            return;
+            // CRITICAL: Exit the function so the arrow logic NEVER runs if on-screen
+            return; 
         }
 
-        // State: Off-screen Target
+        // --- 2. OFF-SCREEN LOGIC (ARROW) ---
         this.currentState = 'arrow';
         this.circleMesh.visible = false;
         this.arrowMesh.visible = true;
@@ -100,7 +113,11 @@ export class ARWayfindingHUD {
             ndc.y *= -1;
         }
 
-        const angle = Math.atan2(ndc.y, ndc.x);
+        // Calculate angle using physical screen dimensions (Aspect Ratio Fix)
+        const physicalX = ndc.x * (frustumWidth / 2);
+        const physicalY = ndc.y * (frustumHeight / 2);
+        const angle = Math.atan2(physicalY, physicalX);
+        
         const margin = 0.9; 
         const maxAbsX = (frustumWidth / 2) * margin;
         const maxAbsY = (frustumHeight / 2) * margin;
