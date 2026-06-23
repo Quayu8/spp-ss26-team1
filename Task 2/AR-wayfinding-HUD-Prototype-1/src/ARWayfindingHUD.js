@@ -1,34 +1,27 @@
 import * as THREE from 'three';
+import { DistanceLabel } from './DistanceLabel.js';
 
 /**
  * ARWayfindingHUD manages a per-target set of frustum-locked indicators.
- * Each target gets its own arrow/circle pair so updates do not overwrite
- * one another when multiple targets are active in the same frame.
+ * Each target gets its own arrow/circle pair and distance label.
  */
 export class ARWayfindingHUD {
     constructor(scene, camera, renderer, config) {
-
-        // Fail fast: enforce explicit configuration to prevent unintended behavior
         if (!config || typeof config.distanceMin === 'undefined' || typeof config.distanceMax === 'undefined') {
             throw new Error(
                 "ARWayfindingHUD initialization failed: A configuration object containing " +
-                "'distanceMin' and 'distanceMax' is strictly required to define the spatial hysteresis."
+                "'distanceMin' and 'distanceMax' is strictly required."
             );
         }
 
         this.camera = camera;
-        this.renderer = renderer; // Required to access the active XR camera
+        this.renderer = renderer; 
         
-        // Map the enforced configuration variables
         this.distanceMin = config.distanceMin;
         this.distanceMax = config.distanceMax;
-        
-        // HUD distance remains optional as it is purely visual, falling back to 2.5m
         this.hudDistance = config.hudDistance !== undefined ? config.hudDistance : 2.5;
 
         this.targetStates = [];
-
-        // Bind HUD to the camera transform to keep indicators in view space.
         scene.add(this.camera);
     }
 
@@ -65,14 +58,17 @@ export class ARWayfindingHUD {
 
         const arrowMesh = this._createArrowMesh();
         const circleMesh = this._createCircleMesh();
+        const distanceLabel = new DistanceLabel();
 
         this.camera.add(arrowMesh);
         this.camera.add(circleMesh);
+        this.camera.add(distanceLabel.getMesh());
 
         const state = {
             currentState: 'hidden',
             arrowMesh,
             circleMesh,
+            distanceLabel
         };
 
         this.targetStates[index] = state;
@@ -86,27 +82,22 @@ export class ARWayfindingHUD {
 
         for (let i = targetCount; i < this.targetStates.length; i += 1) {
             const state = this.targetStates[i];
-            if (!state) {
-                continue;
-            }
+            if (!state) continue;
             state.arrowMesh.visible = false;
             state.circleMesh.visible = false;
+            state.distanceLabel.getMesh().visible = false;
         }
     }
 
     _updateTargetState(targetWorldPos, state) {
-        // Resolve the correct physical camera for the projection math.
-        // In WebXR, the base camera is just a wrapper. We need the actual per-eye camera.
         let evalCamera = this.camera;
         if (this.renderer.xr.isPresenting) {
             const xrCamera = this.renderer.xr.getCamera();
             if (xrCamera.cameras && xrCamera.cameras.length > 0) {
-                // Use the first physical viewport camera (left eye) for projection math
                 evalCamera = xrCamera.cameras[0];
             }
         }
 
-        // Use evalCamera instead of this.camera for all spatial math
         const fovRad = THREE.MathUtils.degToRad(evalCamera.fov);
         const frustumHeight = 2.0 * this.hudDistance * Math.tan(fovRad / 2.0);
         const frustumWidth = frustumHeight * evalCamera.aspect;
@@ -115,6 +106,9 @@ export class ARWayfindingHUD {
         const localPos = targetWorldPos.clone().applyMatrix4(evalCamera.matrixWorldInverse);
         const isBehind = localPos.z > 0;
         const distance = evalCamera.position.distanceTo(targetWorldPos);
+        
+        // Format distance string
+        const distanceString = distance.toFixed(1) + ' m';
 
         const VIEWPORT_INNER = 0.95; 
         const VIEWPORT_OUTER = 1.0; 
@@ -141,14 +135,20 @@ export class ARWayfindingHUD {
             if (state.currentState === 'hidden') {
                 state.arrowMesh.visible = false;
                 state.circleMesh.visible = false;
+                state.distanceLabel.getMesh().visible = false;
             } else if (state.currentState === 'circle') {
                 state.arrowMesh.visible = false;
                 state.circleMesh.visible = true;
-                state.circleMesh.position.set(
-                    THREE.MathUtils.clamp(ndc.x, -1, 1) * (frustumWidth / 2),
-                    THREE.MathUtils.clamp(ndc.y, -1, 1) * (frustumHeight / 2),
-                    -this.hudDistance
-                );
+                
+                const circleX = THREE.MathUtils.clamp(ndc.x, -1, 1) * (frustumWidth / 2);
+                const circleY = THREE.MathUtils.clamp(ndc.y, -1, 1) * (frustumHeight / 2);
+                
+                state.circleMesh.position.set(circleX, circleY, -this.hudDistance);
+                
+                // Update and position label slightly below the circle
+                state.distanceLabel.updateText(distanceString);
+                state.distanceLabel.getMesh().position.set(circleX, circleY - 0.2, -this.hudDistance);
+                state.distanceLabel.getMesh().visible = true;
             }
 
             return;
@@ -178,8 +178,19 @@ export class ARWayfindingHUD {
         const tY = maxAbsY / Math.max(Math.abs(sinA), 0.0001);
         const t = Math.min(tX, tY);
 
-        state.arrowMesh.position.set(cosA * t, sinA * t, -this.hudDistance);
+        const arrowX = cosA * t;
+        const arrowY = sinA * t;
+
+        state.arrowMesh.position.set(arrowX, arrowY, -this.hudDistance);
         state.arrowMesh.rotation.set(0, 0, angle - Math.PI / 2);
+
+        // Update and position label slightly offset from the edge towards the center
+        // This prevents the label from rendering outside the camera frustum
+        state.distanceLabel.updateText(distanceString);
+        const labelOffsetX = arrowX - (cosA * 0.25);
+        const labelOffsetY = arrowY - (sinA * 0.25);
+        state.distanceLabel.getMesh().position.set(labelOffsetX, labelOffsetY, -this.hudDistance);
+        state.distanceLabel.getMesh().visible = true;
     }
 
     update(targetWorldPositions = []) {
