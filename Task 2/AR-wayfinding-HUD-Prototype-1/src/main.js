@@ -14,7 +14,7 @@ renderer.setSize(window.innerWidth, window.innerHeight);
 document.body.appendChild(renderer.domElement);
 
 const controls = new OrbitControls(camera, renderer.domElement);
-controls.enableDamping = true;
+controls.enableDamping = false;
 
 // Grid helper for spatial orientation
 const gridHelper = new THREE.GridHelper(50, 50);

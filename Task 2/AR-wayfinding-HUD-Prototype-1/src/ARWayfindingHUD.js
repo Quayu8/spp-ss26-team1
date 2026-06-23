@@ -103,18 +103,28 @@ export class ARWayfindingHUD {
         const isBehind = localPos.z > 0;
         const distance = this.camera.position.distanceTo(targetWorldPos);
 
-        const DISTANCE_MAX = 20.0;
-        const DISTANCE_MIN = 18.0;
-        const NDC_VOLUMETRIC_THRESHOLD = 1.15;
+        // INNER: The exact physical screen edge. 
+        // OUTER: A 5% off-screen buffer to prevent rapid state flickering at the frame border.
+        const VIEWPORT_INNER = 1.0; 
+        const VIEWPORT_OUTER = 1.05; 
 
-        const onScreen = !isBehind &&
-            Math.abs(ndc.x) <= NDC_VOLUMETRIC_THRESHOLD &&
-            Math.abs(ndc.y) <= NDC_VOLUMETRIC_THRESHOLD;
+        let onScreen = false;
+        
+        if (!isBehind) {
+            if (state.currentState === 'arrow') {
+                // Wait until the pivot point explicitly enters the visible frame
+                onScreen = Math.abs(ndc.x) <= VIEWPORT_INNER && Math.abs(ndc.y) <= VIEWPORT_INNER;
+            } else {
+                // Keep it "on-screen" until it is pushed definitively past the outer buffer zone
+                onScreen = Math.abs(ndc.x) <= VIEWPORT_OUTER && Math.abs(ndc.y) <= VIEWPORT_OUTER;
+            }
+        }
 
         if (onScreen) {
-            if (distance < DISTANCE_MIN) {
+            // Evaluate Distance Hysteresis using the configuration properties
+            if (distance < this.distanceMin) {
                 state.currentState = 'hidden';
-            } else if (distance >= DISTANCE_MAX) {
+            } else if (distance >= this.distanceMax) {
                 state.currentState = 'circle';
             } else if (state.currentState === 'arrow') {
                 state.currentState = 'hidden';
@@ -126,6 +136,7 @@ export class ARWayfindingHUD {
             } else if (state.currentState === 'circle') {
                 state.arrowMesh.visible = false;
                 state.circleMesh.visible = true;
+                // Clamp coordinates strictly to screen bounds
                 state.circleMesh.position.set(
                     THREE.MathUtils.clamp(ndc.x, -1, 1) * (frustumWidth / 2),
                     THREE.MathUtils.clamp(ndc.y, -1, 1) * (frustumHeight / 2),
@@ -145,6 +156,7 @@ export class ARWayfindingHUD {
             ndc.y *= -1;
         }
 
+        // Calculate angle using physical screen dimensions to fix aspect ratio squashing
         const physicalX = ndc.x * (frustumWidth / 2);
         const physicalY = ndc.y * (frustumHeight / 2);
         const angle = Math.atan2(physicalY, physicalX);
@@ -156,6 +168,7 @@ export class ARWayfindingHUD {
         const cosA = Math.cos(angle);
         const sinA = Math.sin(angle);
 
+        // Ray-box intersection for screen edge clamping
         const tX = maxAbsX / Math.max(Math.abs(cosA), 0.0001);
         const tY = maxAbsY / Math.max(Math.abs(sinA), 0.0001);
         const t = Math.min(tX, tY);
