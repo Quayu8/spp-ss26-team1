@@ -24,7 +24,8 @@ scene.add(gridHelper);
 const dummyTargets = [
     new THREE.Vector3(15, 1.6, 0),    // Right
     new THREE.Vector3(-10, 1.6, 10),  // Left-rear
-    new THREE.Vector3(0, 1.6, -25)    // Far forward (triggers circle state)
+    new THREE.Vector3(0, 1.6, -25),   // Far forward (triggers circle state)
+    new THREE.Vector3(0, 15, 25)
 ];
 
 // Instantiate visual markers for the physical anchors
@@ -51,9 +52,8 @@ function animate() {
     requestAnimationFrame(animate);
     controls.update();
 
-    // In a production environment, this would iterate over active targets.
-    // For prototype validation, we track a single target index [0].
-    hud.update(dummyTargets[0]); 
+    // Update one HUD indicator per target.
+    hud.update(dummyTargets);
 
     renderer.render(scene, camera);
 }

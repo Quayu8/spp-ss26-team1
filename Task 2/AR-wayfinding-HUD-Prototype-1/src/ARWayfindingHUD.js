@@ -1,136 +1,164 @@
 import * as THREE from 'three';
 
 /**
- * ARWayfindingHUD manages the frustum-locked spatial indicators.
- * It translates 3D world coordinates into 2D viewport-constrained UI transformations.
+ * ARWayfindingHUD manages a per-target set of frustum-locked indicators.
+ * Each target gets its own arrow/circle pair so updates do not overwrite
+ * one another when multiple targets are active in the same frame.
  */
 export class ARWayfindingHUD {
     constructor(scene, camera, hudDistance = 2.5) {
         this.camera = camera;
         this.hudDistance = hudDistance;
-        this.currentState = 'hidden';
-        
-        this.arrowMesh = this._createArrowMesh();
-        this.circleMesh = this._createCircleMesh();
+        this.targetStates = [];
 
-        // Bind HUD to the camera transform to maintain a static relative position
+        // Bind HUD to the camera transform to keep indicators in view space.
         scene.add(this.camera);
-        this.camera.add(this.arrowMesh);
-        this.camera.add(this.circleMesh);
     }
 
     _createHudMaterial(colorHex) {
         return new THREE.MeshBasicMaterial({
             color: colorHex,
-            depthTest: false,   // Render on top of scene geometry
+            depthTest: false,
             depthWrite: false,
             transparent: true,
         });
     }
 
-    _createArrowMesh() {
+    _createArrowMesh(colorHex = 0xff3b30) {
         const geo = new THREE.ConeGeometry(0.1, 0.3, 16);
-        geo.translate(0, 0.15, 0); // Shift pivot point to the base of the cone
-        const mesh = new THREE.Mesh(geo, this._createHudMaterial(0xff3b30));
+        geo.translate(0, 0.15, 0);
+        const mesh = new THREE.Mesh(geo, this._createHudMaterial(colorHex));
         mesh.renderOrder = 999;
         mesh.visible = false;
         return mesh;
     }
 
-    _createCircleMesh() {
+    _createCircleMesh(colorHex = 0xff3b30) {
         const geo = new THREE.RingGeometry(0.08, 0.12, 32);
-        const mesh = new THREE.Mesh(geo, this._createHudMaterial(0xff3b30));
+        const mesh = new THREE.Mesh(geo, this._createHudMaterial(colorHex));
         mesh.renderOrder = 999;
         mesh.visible = false;
         return mesh;
     }
-/**
-     * Evaluates spatial data and updates UI state.
-     * @param {THREE.Vector3} targetWorldPos 
-     */
-    update(targetWorldPos) {
-        // Calculate dynamic frustum dimensions based on current camera FOV and aspect ratio
+
+    _ensureTargetState(index) {
+        if (this.targetStates[index]) {
+            return this.targetStates[index];
+        }
+
+        const arrowMesh = this._createArrowMesh();
+        const circleMesh = this._createCircleMesh();
+
+        this.camera.add(arrowMesh);
+        this.camera.add(circleMesh);
+
+        const state = {
+            currentState: 'hidden',
+            arrowMesh,
+            circleMesh,
+        };
+
+        this.targetStates[index] = state;
+        return state;
+    }
+
+
+    _syncTargetCount(targetCount) {
+        for (let i = this.targetStates.length; i < targetCount; i += 1) {
+            this._ensureTargetState(i);
+        }
+
+        for (let i = targetCount; i < this.targetStates.length; i += 1) {
+            const state = this.targetStates[i];
+            if (!state) {
+                continue;
+            }
+            state.arrowMesh.visible = false;
+            state.circleMesh.visible = false;
+        }
+    }
+
+    _updateTargetState(targetWorldPos, state) {
         const fovRad = THREE.MathUtils.degToRad(this.camera.fov);
         const frustumHeight = 2.0 * this.hudDistance * Math.tan(fovRad / 2.0);
         const frustumWidth = frustumHeight * this.camera.aspect;
 
         const ndc = targetWorldPos.clone().project(this.camera);
-        
-        // Transform target to local camera space to verify if it is positioned behind the user
         const localPos = targetWorldPos.clone().applyMatrix4(this.camera.matrixWorldInverse);
-        const isBehind = localPos.z > 0; 
+        const isBehind = localPos.z > 0;
         const distance = this.camera.position.distanceTo(targetWorldPos);
 
-        // Hysteresis constants
         const DISTANCE_MAX = 20.0;
         const DISTANCE_MIN = 18.0;
         const NDC_VOLUMETRIC_THRESHOLD = 1.15;
 
-        // Determine visibility bounds including volumetric geometry approximation
-        const onScreen = !isBehind && 
-                         Math.abs(ndc.x) <= NDC_VOLUMETRIC_THRESHOLD && 
-                         Math.abs(ndc.y) <= NDC_VOLUMETRIC_THRESHOLD;
+        const onScreen = !isBehind &&
+            Math.abs(ndc.x) <= NDC_VOLUMETRIC_THRESHOLD &&
+            Math.abs(ndc.y) <= NDC_VOLUMETRIC_THRESHOLD;
 
-        // --- 1. ON-SCREEN LOGIC ---
         if (onScreen) {
-            // Evaluate Hysteresis State
             if (distance < DISTANCE_MIN) {
-                this.currentState = 'hidden';
+                state.currentState = 'hidden';
             } else if (distance >= DISTANCE_MAX) {
-                this.currentState = 'circle';
-            } else if (this.currentState === 'arrow') {
-                // If it enters the screen exactly inside the deadband (18-20m),
-                // we need a valid on-screen default. We default to 'hidden'.
-                this.currentState = 'hidden';
+                state.currentState = 'circle';
+            } else if (state.currentState === 'arrow') {
+                state.currentState = 'hidden';
             }
 
-            // Apply Visuals based on the resolved state
-            if (this.currentState === 'hidden') {
-                this.arrowMesh.visible = false;
-                this.circleMesh.visible = false;
-            } else if (this.currentState === 'circle') {
-                this.arrowMesh.visible = false;
-                this.circleMesh.visible = true;
-                
-                this.circleMesh.position.set(
-                    Math.max(-1, Math.min(1, ndc.x)) * (frustumWidth / 2), 
-                    Math.max(-1, Math.min(1, ndc.y)) * (frustumHeight / 2), 
+            if (state.currentState === 'hidden') {
+                state.arrowMesh.visible = false;
+                state.circleMesh.visible = false;
+            } else if (state.currentState === 'circle') {
+                state.arrowMesh.visible = false;
+                state.circleMesh.visible = true;
+                state.circleMesh.position.set(
+                    THREE.MathUtils.clamp(ndc.x, -1, 1) * (frustumWidth / 2),
+                    THREE.MathUtils.clamp(ndc.y, -1, 1) * (frustumHeight / 2),
                     -this.hudDistance
                 );
             }
-            
-            // CRITICAL: Exit the function so the arrow logic NEVER runs if on-screen
-            return; 
+
+            return;
         }
 
-        // --- 2. OFF-SCREEN LOGIC (ARROW) ---
-        this.currentState = 'arrow';
-        this.circleMesh.visible = false;
-        this.arrowMesh.visible = true;
+        state.currentState = 'arrow';
+        state.circleMesh.visible = false;
+        state.arrowMesh.visible = true;
 
         if (isBehind) {
             ndc.x *= -1;
             ndc.y *= -1;
         }
 
-        // Calculate angle using physical screen dimensions (Aspect Ratio Fix)
         const physicalX = ndc.x * (frustumWidth / 2);
         const physicalY = ndc.y * (frustumHeight / 2);
         const angle = Math.atan2(physicalY, physicalX);
-        
-        const margin = 0.9; 
+
+        const margin = 0.9;
         const maxAbsX = (frustumWidth / 2) * margin;
         const maxAbsY = (frustumHeight / 2) * margin;
 
         const cosA = Math.cos(angle);
         const sinA = Math.sin(angle);
 
-        // Compute ray-box intersection for screen edge clamping
         const tX = maxAbsX / Math.max(Math.abs(cosA), 0.0001);
         const tY = maxAbsY / Math.max(Math.abs(sinA), 0.0001);
         const t = Math.min(tX, tY);
 
-        this.arrowMesh.position.set(cosA * t, sinA * t, -this.hudDistance);
-        this.arrowMesh.rotation.set(0, 0, angle - Math.PI / 2); 
+        state.arrowMesh.position.set(cosA * t, sinA * t, -this.hudDistance);
+        state.arrowMesh.rotation.set(0, 0, angle - Math.PI / 2);
+    }
+
+    /**
+     * Evaluates all active targets and updates their HUD indicators.
+     * @param {THREE.Vector3[]} targetWorldPositions
+     */
+    update(targetWorldPositions = []) {
+        this._syncTargetCount(targetWorldPositions.length);
+
+        targetWorldPositions.forEach((targetWorldPos, index) => {
+            const state = this._ensureTargetState(index);
+            this._updateTargetState(targetWorldPos, state);
+        });
     }
 }
