@@ -6,7 +6,7 @@ import * as THREE from 'three';
  * one another when multiple targets are active in the same frame.
  */
 export class ARWayfindingHUD {
-    constructor(scene, camera, config) {
+    constructor(scene, camera, renderer, config) {
 
         // Fail fast: enforce explicit configuration to prevent unintended behavior
         if (!config || typeof config.distanceMin === 'undefined' || typeof config.distanceMax === 'undefined') {
@@ -17,6 +17,8 @@ export class ARWayfindingHUD {
         }
 
         this.camera = camera;
+        this.renderer = renderer; // Required to access the active XR camera
+        
         // Map the enforced configuration variables
         this.distanceMin = config.distanceMin;
         this.distanceMax = config.distanceMax;
@@ -93,42 +95,46 @@ export class ARWayfindingHUD {
     }
 
     _updateTargetState(targetWorldPos, state) {
-        const fovRad = THREE.MathUtils.degToRad(this.camera.fov);
+        // Resolve the correct physical camera for the projection math.
+        // In WebXR, the base camera is just a wrapper. We need the actual per-eye camera.
+        let evalCamera = this.camera;
+        if (this.renderer.xr.isPresenting) {
+            const xrCamera = this.renderer.xr.getCamera();
+            if (xrCamera.cameras && xrCamera.cameras.length > 0) {
+                // Use the first physical viewport camera (left eye) for projection math
+                evalCamera = xrCamera.cameras[0];
+            }
+        }
+
+        // Use evalCamera instead of this.camera for all spatial math
+        const fovRad = THREE.MathUtils.degToRad(evalCamera.fov);
         const frustumHeight = 2.0 * this.hudDistance * Math.tan(fovRad / 2.0);
-        const frustumWidth = frustumHeight * this.camera.aspect;
+        const frustumWidth = frustumHeight * evalCamera.aspect;
 
-        const ndc = targetWorldPos.clone().project(this.camera);
-        const localPos = targetWorldPos.clone().applyMatrix4(this.camera.matrixWorldInverse);
+        const ndc = targetWorldPos.clone().project(evalCamera);
+        const localPos = targetWorldPos.clone().applyMatrix4(evalCamera.matrixWorldInverse);
         const isBehind = localPos.z > 0;
-        const distance = this.camera.position.distanceTo(targetWorldPos);
+        const distance = evalCamera.position.distanceTo(targetWorldPos);
 
-        // INNER: The target must be safely inside the visible screen (5% margin) to switch from arrow to circle.
         const VIEWPORT_INNER = 0.95; 
-        
-        // OUTER: The exact physical screen edge. Once the target leaves the screen, it immediately becomes an arrow.
         const VIEWPORT_OUTER = 1.0; 
 
         let onScreen = false;
         
         if (!isBehind) {
             if (state.currentState === 'arrow') {
-                // Wait until the pivot point explicitly enters the inner visible frame
                 onScreen = Math.abs(ndc.x) <= VIEWPORT_INNER && Math.abs(ndc.y) <= VIEWPORT_INNER;
             } else {
-                // Keep it "on-screen" until it is pushed definitively past the physical edge
                 onScreen = Math.abs(ndc.x) <= VIEWPORT_OUTER && Math.abs(ndc.y) <= VIEWPORT_OUTER;
             }
         }
 
         if (onScreen) {
-            // Evaluate Distance Hysteresis using the configuration properties
             if (distance < this.distanceMin) {
                 state.currentState = 'hidden';
             } else if (distance >= this.distanceMax) {
                 state.currentState = 'circle';
             } else if (state.currentState === 'arrow') {
-                // When entering the screen in the middle zone (between min and max distance),
-                // default to showing the circle instead of hiding it abruptly.
                 state.currentState = 'circle';
             }
 
@@ -138,7 +144,6 @@ export class ARWayfindingHUD {
             } else if (state.currentState === 'circle') {
                 state.arrowMesh.visible = false;
                 state.circleMesh.visible = true;
-                // Clamp coordinates strictly to screen bounds
                 state.circleMesh.position.set(
                     THREE.MathUtils.clamp(ndc.x, -1, 1) * (frustumWidth / 2),
                     THREE.MathUtils.clamp(ndc.y, -1, 1) * (frustumHeight / 2),
@@ -158,7 +163,6 @@ export class ARWayfindingHUD {
             ndc.y *= -1;
         }
 
-        // Calculate angle using physical screen dimensions to fix aspect ratio squashing
         const physicalX = ndc.x * (frustumWidth / 2);
         const physicalY = ndc.y * (frustumHeight / 2);
         const angle = Math.atan2(physicalY, physicalX);
@@ -170,7 +174,6 @@ export class ARWayfindingHUD {
         const cosA = Math.cos(angle);
         const sinA = Math.sin(angle);
 
-        // Ray-box intersection for screen edge clamping
         const tX = maxAbsX / Math.max(Math.abs(cosA), 0.0001);
         const tY = maxAbsY / Math.max(Math.abs(sinA), 0.0001);
         const t = Math.min(tX, tY);
@@ -179,10 +182,6 @@ export class ARWayfindingHUD {
         state.arrowMesh.rotation.set(0, 0, angle - Math.PI / 2);
     }
 
-    /**
-     * Evaluates all active targets and updates their HUD indicators.
-     * @param {THREE.Vector3[]} targetWorldPositions
-     */
     update(targetWorldPositions = []) {
         this._syncTargetCount(targetWorldPositions.length);
 
