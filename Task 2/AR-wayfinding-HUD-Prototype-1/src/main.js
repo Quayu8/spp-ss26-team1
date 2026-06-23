@@ -16,6 +16,9 @@ document.body.appendChild(renderer.domElement);
 const controls = new OrbitControls(camera, renderer.domElement);
 controls.enableDamping = false;
 
+controls.target.set(0, 1.6, 4.99);
+controls.update();
+
 // Grid helper for spatial orientation
 const gridHelper = new THREE.GridHelper(50, 50);
 scene.add(gridHelper);
@@ -37,12 +40,12 @@ dummyTargets.forEach((pos, index) => {
     scene.add(sphere);
 });
 
-// Initialization in main.js
-// The developer is now forced to actively decide the operating distances
+// Initialization of the AR Wayfinding HUD
+// The developer is forced to actively decide the operating distances
 const hudConfig = {
     distanceMin: 18.0,
     distanceMax: 20.0,
-    hudDistance: 2.5 // This one is optional and could be left out
+    hudDistance: 2.5 // Optional visual distance
 };
 
 const hud = new ARWayfindingHUD(scene, camera, hudConfig);

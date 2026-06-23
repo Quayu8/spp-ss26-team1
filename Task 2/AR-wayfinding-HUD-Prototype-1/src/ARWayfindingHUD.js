@@ -77,7 +77,6 @@ export class ARWayfindingHUD {
         return state;
     }
 
-
     _syncTargetCount(targetCount) {
         for (let i = this.targetStates.length; i < targetCount; i += 1) {
             this._ensureTargetState(i);
@@ -103,19 +102,20 @@ export class ARWayfindingHUD {
         const isBehind = localPos.z > 0;
         const distance = this.camera.position.distanceTo(targetWorldPos);
 
-        // INNER: The exact physical screen edge. 
-        // OUTER: A 5% off-screen buffer to prevent rapid state flickering at the frame border.
-        const VIEWPORT_INNER = 1.0; 
-        const VIEWPORT_OUTER = 1.05; 
+        // INNER: The target must be safely inside the visible screen (5% margin) to switch from arrow to circle.
+        const VIEWPORT_INNER = 0.95; 
+        
+        // OUTER: The exact physical screen edge. Once the target leaves the screen, it immediately becomes an arrow.
+        const VIEWPORT_OUTER = 1.0; 
 
         let onScreen = false;
         
         if (!isBehind) {
             if (state.currentState === 'arrow') {
-                // Wait until the pivot point explicitly enters the visible frame
+                // Wait until the pivot point explicitly enters the inner visible frame
                 onScreen = Math.abs(ndc.x) <= VIEWPORT_INNER && Math.abs(ndc.y) <= VIEWPORT_INNER;
             } else {
-                // Keep it "on-screen" until it is pushed definitively past the outer buffer zone
+                // Keep it "on-screen" until it is pushed definitively past the physical edge
                 onScreen = Math.abs(ndc.x) <= VIEWPORT_OUTER && Math.abs(ndc.y) <= VIEWPORT_OUTER;
             }
         }
@@ -127,7 +127,9 @@ export class ARWayfindingHUD {
             } else if (distance >= this.distanceMax) {
                 state.currentState = 'circle';
             } else if (state.currentState === 'arrow') {
-                state.currentState = 'hidden';
+                // When entering the screen in the middle zone (between min and max distance),
+                // default to showing the circle instead of hiding it abruptly.
+                state.currentState = 'circle';
             }
 
             if (state.currentState === 'hidden') {
