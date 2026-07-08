@@ -52,7 +52,12 @@ dummyTargets.forEach((pos) => {
 const hudConfig = {
     distanceMin: 18.0,
     distanceMax: 20.0,
-    hudDistance: 2.5 
+    hudDistance: 2.5,
+    // Optional: provide custom sprite textures for the HUD indicators.
+    // Accepts a URL string (relative to the project root) or a pre-built THREE.Texture.
+    // If omitted, the module falls back to procedural ConeGeometry / RingGeometry.
+    arrowSprite: './src/assets/Arrow-Right-1-icon-1515697076.png',
+    //circleSprite: './src/assets/Circle-Logo-Template-PNG-HD-2761340067.png',
 };
 
 // Pass the renderer into the HUD so it can access the active WebXR camera array

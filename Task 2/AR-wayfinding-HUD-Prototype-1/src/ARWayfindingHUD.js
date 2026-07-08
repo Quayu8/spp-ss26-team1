@@ -6,6 +6,22 @@ import { DistanceLabel } from './DistanceLabel.js';
  * Each target gets its own arrow/circle pair and distance label.
  */
 export class ARWayfindingHUD {
+    /**
+     * @param {THREE.Scene} scene
+     * @param {THREE.PerspectiveCamera} camera
+     * @param {THREE.WebGLRenderer} renderer
+     * @param {object} config
+     * @param {number} config.distanceMin - Distance (m) below which the indicator is hidden.
+     * @param {number} config.distanceMax - Distance (m) above which the circle indicator is shown.
+     * @param {number} [config.hudDistance=2.5] - Distance (m) at which HUD elements are placed in front of the camera.
+     * @param {string|THREE.Texture} [config.arrowSprite] - Optional custom texture for the directional arrow indicator.
+     *   Accepts a URL string or a pre-built THREE.Texture. If omitted, a procedural ConeGeometry is used as fallback.
+     *   IMPORTANT: The arrow asset must point UPWARD (12 o'clock) and be centered on the image canvas.
+     *   The rotation logic uses atan2 with a -90° offset, so an upward-pointing sprite will correctly
+     *   track the target direction at runtime.
+     * @param {string|THREE.Texture} [config.circleSprite] - Optional custom texture for the on-screen ring indicator.
+     *   Accepts a URL string or a pre-built THREE.Texture. If omitted, a procedural RingGeometry is used as fallback.
+     */
     constructor(scene, camera, renderer, config) {
         if (!config || typeof config.distanceMin === 'undefined' || typeof config.distanceMax === 'undefined') {
             throw new Error(
@@ -21,6 +37,11 @@ export class ARWayfindingHUD {
         this.distanceMax = config.distanceMax;
         this.hudDistance = config.hudDistance !== undefined ? config.hudDistance : 2.5;
 
+        this._arrowTexture = config.arrowSprite || null;
+        this._circleTexture = config.circleSprite || null;
+        this._useArrowSprite = !!this._arrowTexture;
+        this._useCircleSprite = !!this._circleTexture;
+
         this.targetStates = [];
         scene.add(this.camera);
     }
@@ -32,6 +53,49 @@ export class ARWayfindingHUD {
             depthWrite: false,
             transparent: true,
         });
+    }
+
+    _resolveTexture(source) {
+        if (source instanceof THREE.Texture) {
+            return source;
+        }
+        return new THREE.TextureLoader().load(source);
+    }
+
+    _createArrowSprite() {
+        const texture = this._arrowTexture
+            ? this._resolveTexture(this._arrowTexture)
+            : null;
+        const material = new THREE.SpriteMaterial({
+            map: texture,
+            color: texture ? 0xffffff : 0xff3b30,
+            depthTest: false,
+            depthWrite: false,
+            transparent: true,
+        });
+        const sprite = new THREE.Sprite(material);
+        sprite.renderOrder = 999;
+        sprite.scale.set(0.3, 0.3, 1);
+        sprite.visible = false;
+        return sprite;
+    }
+
+    _createCircleSprite() {
+        const texture = this._circleTexture
+            ? this._resolveTexture(this._circleTexture)
+            : null;
+        const material = new THREE.SpriteMaterial({
+            map: texture,
+            color: texture ? 0xffffff : 0xff3b30,
+            depthTest: false,
+            depthWrite: false,
+            transparent: true,
+        });
+        const sprite = new THREE.Sprite(material);
+        sprite.renderOrder = 999;
+        sprite.scale.set(0.3, 0.3, 1);
+        sprite.visible = false;
+        return sprite;
     }
 
     _createArrowMesh(colorHex = 0xff3b30) {
@@ -56,8 +120,8 @@ export class ARWayfindingHUD {
             return this.targetStates[index];
         }
 
-        const arrowMesh = this._createArrowMesh();
-        const circleMesh = this._createCircleMesh();
+        const arrowMesh = this._useArrowSprite ? this._createArrowSprite() : this._createArrowMesh();
+        const circleMesh = this._useCircleSprite ? this._createCircleSprite() : this._createCircleMesh();
         const distanceLabel = new DistanceLabel();
 
         this.camera.add(arrowMesh);
@@ -182,7 +246,11 @@ export class ARWayfindingHUD {
         const arrowY = sinA * t;
 
         state.arrowMesh.position.set(arrowX, arrowY, -this.hudDistance);
-        state.arrowMesh.rotation.set(0, 0, angle - Math.PI / 2);
+        if (this._useArrowSprite) {
+            state.arrowMesh.material.rotation = angle - Math.PI / 2;
+        } else {
+            state.arrowMesh.rotation.set(0, 0, angle - Math.PI / 2);
+        }
 
         // Update and position label slightly offset from the edge towards the center
         // This prevents the label from rendering outside the camera frustum
