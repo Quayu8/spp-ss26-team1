@@ -51,8 +51,8 @@ const hudConfig = {
     hudDistance: 1.5,
     indicatorScale: 0.4,  // shrink indicators for mobile screen
     labelScale: 0.5,      // shrink distance labels for mobile screen
-    // arrowSprite: './src/assets/Arrow-Right-1-icon-1515697076.png',
-    // circleSprite: './src/assets/Circle-Logo-Template-PNG-HD-2761340067.png',
+    arrowSprite: './src/assets/Arrow-Right-1-icon-1515697076.png',
+    circleSprite: './src/assets/Circle-Logo-Template-PNG-HD-2761340067.png',
 };
 
 let hud = null;
@@ -104,6 +104,7 @@ async function startAR() {
 
         // Instantiate HUD once the session (and therefore the XR camera) is live
         hud = new ARWayfindingHUD(scene, camera, renderer, hudConfig);
+        hud.setWaypoints(waypoints);
 
         enterArBtn.textContent = 'AR running';
         setStatus('AR active.\nWalk around to test the HUD indicators.');
@@ -136,9 +137,24 @@ window.addEventListener('resize', () => {
 // Render loop — physical device movement drives the camera automatically via
 // the WebXR runtime (ARCore/ARKit); no keyboard input needed.
 // ---------------------------------------------------------------------------
-renderer.setAnimationLoop(() => {
+const testWaypoint = new THREE.Vector3(0, 0, 3);
+let testWaypointActive = false;
+let lastToggleTime = 0;
+
+renderer.setAnimationLoop((timestamp) => {
     if (hud) {
-        hud.update(waypoints);
+        /* test update function of waypoints
+        if (timestamp - lastToggleTime >= 3000) {
+            lastToggleTime = timestamp;
+            if (testWaypointActive) {
+                hud.removeWaypoint(hud._waypoints.length - 1);
+                testWaypointActive = false;
+            } else {
+                hud.addWaypoint(testWaypoint);
+                testWaypointActive = true;
+            }
+        }*/
+        hud.update();
     }
     renderer.render(scene, camera);
 });

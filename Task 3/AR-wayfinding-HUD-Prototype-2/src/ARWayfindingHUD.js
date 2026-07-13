@@ -49,7 +49,32 @@ export class ARWayfindingHUD {
         this._labelScale = config.labelScale !== undefined ? config.labelScale : 1.0;
 
         this.targetStates = [];
+        this._waypoints = [];
         scene.add(this.camera);
+    }
+
+    /**
+     * Replace the entire waypoint list.
+     * @param {THREE.Vector3[]} positions
+     */
+    setWaypoints(positions) {
+        this._waypoints = [...positions];
+    }
+
+    /**
+     * Append a single waypoint.
+     * @param {THREE.Vector3} position
+     */
+    addWaypoint(position) {
+        this._waypoints.push(position);
+    }
+
+    /**
+     * Remove the waypoint at the given index.
+     * @param {number} index
+     */
+    removeWaypoint(index) {
+        this._waypoints.splice(index, 1);
     }
 
     _createHudMaterial(colorHex) {
@@ -281,7 +306,8 @@ export class ARWayfindingHUD {
         state.distanceLabel.getMesh().visible = true;
     }
 
-    update(targetWorldPositions = []) {
+    update() {
+        const targetWorldPositions = this._waypoints;
         this._syncTargetCount(targetWorldPositions.length);
 
         targetWorldPositions.forEach((targetWorldPos, index) => {
