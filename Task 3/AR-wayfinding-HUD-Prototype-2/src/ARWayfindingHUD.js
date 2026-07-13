@@ -212,7 +212,7 @@ export class ARWayfindingHUD {
                 state.currentState = 'hidden';
             } else if (distance >= this.distanceMax) {
                 state.currentState = 'circle';
-            } else if (state.currentState === 'arrow') {
+            } else if (state.currentState !== 'circle') {
                 state.currentState = 'circle';
             }
 
