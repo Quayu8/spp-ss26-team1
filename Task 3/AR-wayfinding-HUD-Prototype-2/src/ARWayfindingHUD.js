@@ -165,7 +165,8 @@ export class ARWayfindingHUD {
             currentState: 'hidden',
             arrowMesh,
             circleMesh,
-            distanceLabel
+            distanceLabel,
+            smoothedCirclePos: new THREE.Vector3()
         };
 
         this.targetStates[index] = state;
@@ -252,11 +253,20 @@ export class ARWayfindingHUD {
                 const circleX = THREE.MathUtils.clamp(ndc.x, -1, 1) * (frustumWidth / 2);
                 const circleY = THREE.MathUtils.clamp(ndc.y, -1, 1) * (frustumHeight / 2);
                 
-                state.circleMesh.position.set(circleX, circleY, -this.hudDistance);
+                const circleDamping = 0.15;
+                state.smoothedCirclePos.lerp(
+                    new THREE.Vector3(circleX, circleY, -this.hudDistance),
+                    circleDamping
+                );
+                state.circleMesh.position.copy(state.smoothedCirclePos);
                 
                 // Update and position label slightly below the circle
                 state.distanceLabel.updateText(distanceString);
-                state.distanceLabel.getMesh().position.set(circleX, circleY - this.hudDistance * 0.08, -this.hudDistance);
+                state.distanceLabel.getMesh().position.set(
+                    state.smoothedCirclePos.x,
+                    state.smoothedCirclePos.y - this.hudDistance * 0.08,
+                    -this.hudDistance
+                );
                 state.distanceLabel.getMesh().visible = true;
             }
 
