@@ -32,7 +32,7 @@ const physicalY = ndc.y * (frustumHeight / 2);
 const angle = Math.atan2(physicalY, physicalX);
 ```
 
-
+![Problem 2](photos/Problem_2.png)
 ---
 
 ## Problem 3 (Folgefehler von Problem 2 – Circle verhält sich falsch)
@@ -50,6 +50,8 @@ if (onScreen && (distance >= DISTANCE_MAX || this.currentState === 'circle')) {
 
 Da das `update()` zuvor über mehrere unabhängige `if`-Abfragen die States gewechselt hat, wurde `currentState === 'arrow'` stets priorisiert. Die Logik wurde daher auf `else if`-Abfragen umgestellt.
 
+
+![Problem 3](photos/Problem_3.png)
 
 
 ---
@@ -139,7 +141,7 @@ if (!isBehind) {
 
 }
 ```
-
+![Problem 6](photos/Problem_6.png)
 
 ---
 
