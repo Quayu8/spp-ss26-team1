@@ -7,10 +7,10 @@ import { ARWayfindingHUD } from './ARWayfindingHUD.js';
 // Adjust these values to place targets at meaningful distances for your test.
 // ---------------------------------------------------------------------------
 const waypoints = [
-    new THREE.Vector3( 10,  0,   0),   // 10 m to the right
-    new THREE.Vector3(-8,   0,   5),   // 8 m left, 5 m forward
-    new THREE.Vector3( 0,   0, -15),   // 15 m behind
-    new THREE.Vector3( 5,   2,   8),   // elevated target
+    new THREE.Vector3( 3,  0,   0),   // 10 m to the right
+    new THREE.Vector3(-2,   0,   5),   // 8 m left, 5 m forward
+    new THREE.Vector3( 0,   0, -4),   // 15 m behind
+    new THREE.Vector3( 1,   2,   2),   // elevated target
 ];
 
 // ---------------------------------------------------------------------------
