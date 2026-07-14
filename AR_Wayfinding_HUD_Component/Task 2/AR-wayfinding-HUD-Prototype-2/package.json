@@ -7,9 +7,13 @@
     "dev": "vite",
     "dev:host": "vite --host",
     "build": "vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "test:unit": "node --test test/unit/*.test.js",
+    "test:e2e": "playwright test --config playwright-tests/playwright.config.js",
+    "test": "npm run test:unit && npm run test:e2e"
   },
   "devDependencies": {
+    "@playwright/test": "^1.61.1",
     "vite": "^8.0.12",
     "vite-plugin-mkcert": "^1.17.6"
   },

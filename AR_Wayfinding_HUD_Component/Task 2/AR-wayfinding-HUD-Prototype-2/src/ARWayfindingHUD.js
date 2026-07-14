@@ -1,5 +1,9 @@
 import * as THREE from 'three';
 import { DistanceLabel } from './DistanceLabel.js';
+import {
+    computeTargetPlacement,
+    getEvaluationCamera,
+} from './hud-placement.js';
 
 /**
  * ARWayfindingHUD manages a per-target set of frustum-locked indicators.
@@ -188,132 +192,49 @@ export class ARWayfindingHUD {
     }
 
     _updateTargetState(targetWorldPos, state) {
-        let evalCamera = this.camera;
-        if (this.renderer.xr.isPresenting) {
-            const xrCamera = this.renderer.xr.getCamera();
-            if (xrCamera.cameras && xrCamera.cameras.length > 0) {
-                evalCamera = xrCamera.cameras[0];
-            }
-        }
+        const evalCamera = getEvaluationCamera(this.renderer, this.camera);
+        const placement = computeTargetPlacement({
+            targetWorldPos,
+            camera: evalCamera,
+            hudDistance: this.hudDistance,
+            distanceMin: this.distanceMin,
+            distanceMax: this.distanceMax,
+            previousState: state.currentState,
+            isXrSession: !!this.renderer?.xr?.isPresenting,
+        });
 
-        let frustumHeight, frustumWidth;
-        if (this.renderer.xr.isPresenting) {
-            // In WebXR the sub-camera's fov/aspect properties are not reliably updated.
-            // Extract them directly from the projection matrix instead.
-            // projectionMatrix.elements[5] = 1/tan(fovY/2), elements[0] = 1/tan(fovX/2)
-            const m = evalCamera.projectionMatrix.elements;
-            const tanHalfFovY = 1.0 / m[5];
-            const tanHalfFovX = 1.0 / m[0];
-            frustumHeight = 2.0 * this.hudDistance * tanHalfFovY;
-            frustumWidth  = 2.0 * this.hudDistance * tanHalfFovX;
-        } else {
-            const fovRad = THREE.MathUtils.degToRad(evalCamera.fov);
-            frustumHeight = 2.0 * this.hudDistance * Math.tan(fovRad / 2.0);
-            frustumWidth  = frustumHeight * evalCamera.aspect;
-        }
+        state.currentState = placement.state;
 
-        const ndc = targetWorldPos.clone().project(evalCamera);
-        const localPos = targetWorldPos.clone().applyMatrix4(evalCamera.matrixWorldInverse);
-        const isBehind = localPos.z > 0;
-        const distance = evalCamera.position.distanceTo(targetWorldPos);
-        
-        // Format distance string
-        const distanceString = distance.toFixed(1) + ' m';
-
-        const VIEWPORT_INNER = 0.95; 
-        const VIEWPORT_OUTER = 1.0; 
-
-        let onScreen = false;
-        
-        if (!isBehind) {
-            if (state.currentState === 'arrow') {
-                onScreen = Math.abs(ndc.x) <= VIEWPORT_INNER && Math.abs(ndc.y) <= VIEWPORT_INNER;
-            } else {
-                onScreen = Math.abs(ndc.x) <= VIEWPORT_OUTER && Math.abs(ndc.y) <= VIEWPORT_OUTER;
-            }
-        }
-
-        if (onScreen) {
-            if (distance < this.distanceMin) {
-                state.currentState = 'hidden';
-            } else if (distance >= this.distanceMax) {
-                state.currentState = 'circle';
-            } else if (state.currentState !== 'circle') {
-                state.currentState = 'circle';
-            }
-
-            if (state.currentState === 'hidden') {
-                state.arrowMesh.visible = false;
-                state.circleMesh.visible = false;
-                state.distanceLabel.getMesh().visible = false;
-            } else if (state.currentState === 'circle') {
-                state.arrowMesh.visible = false;
-                state.circleMesh.visible = true;
-                
-                const circleX = THREE.MathUtils.clamp(ndc.x, -1, 1) * (frustumWidth / 2);
-                const circleY = THREE.MathUtils.clamp(ndc.y, -1, 1) * (frustumHeight / 2);
-                
-                const circleDamping = 0.15;
-                state.smoothedCirclePos.lerp(
-                    new THREE.Vector3(circleX, circleY, -this.hudDistance),
-                    circleDamping
-                );
-                state.circleMesh.position.copy(state.smoothedCirclePos);
-                
-                // Update and position label slightly below the circle
-                state.distanceLabel.updateText(distanceString);
-                state.distanceLabel.getMesh().position.set(
-                    state.smoothedCirclePos.x,
-                    state.smoothedCirclePos.y - this.hudDistance * 0.08,
-                    -this.hudDistance
-                );
-                state.distanceLabel.getMesh().visible = true;
-            }
-
+        if (placement.state === 'hidden') {
+            state.arrowMesh.visible = false;
+            state.circleMesh.visible = false;
+            state.distanceLabel.getMesh().visible = false;
             return;
         }
 
-        state.currentState = 'arrow';
+        state.distanceLabel.updateText(placement.distanceLabel);
+        state.distanceLabel.getMesh().position.copy(placement.labelPosition);
+        state.distanceLabel.getMesh().visible = true;
+
+        if (placement.state === 'circle') {
+            state.arrowMesh.visible = false;
+            state.circleMesh.visible = true;
+
+            const circleDamping = 0.15;
+            state.smoothedCirclePos.lerp(placement.circlePosition, circleDamping);
+            state.circleMesh.position.copy(state.smoothedCirclePos);
+            return;
+        }
+
         state.circleMesh.visible = false;
         state.arrowMesh.visible = true;
 
-        if (isBehind) {
-            ndc.x *= -1;
-            ndc.y *= -1;
-        }
-
-        const physicalX = ndc.x * (frustumWidth / 2);
-        const physicalY = ndc.y * (frustumHeight / 2);
-        const angle = Math.atan2(physicalY, physicalX);
-
-        const margin = 0.9;
-        const maxAbsX = (frustumWidth / 2) * margin;
-        const maxAbsY = (frustumHeight / 2) * margin;
-
-        const cosA = Math.cos(angle);
-        const sinA = Math.sin(angle);
-
-        const tX = maxAbsX / Math.max(Math.abs(cosA), 0.0001);
-        const tY = maxAbsY / Math.max(Math.abs(sinA), 0.0001);
-        const t = Math.min(tX, tY);
-
-        const arrowX = cosA * t;
-        const arrowY = sinA * t;
-
-        state.arrowMesh.position.set(arrowX, arrowY, -this.hudDistance);
+        state.arrowMesh.position.copy(placement.arrowPosition);
         if (this._useArrowSprite) {
-            state.arrowMesh.material.rotation = angle - Math.PI / 2;
+            state.arrowMesh.material.rotation = placement.arrowRotationZ;
         } else {
-            state.arrowMesh.rotation.set(0, 0, angle - Math.PI / 2);
+            state.arrowMesh.rotation.set(0, 0, placement.arrowRotationZ);
         }
-
-        // Update and position label slightly offset from the edge towards the center
-        // This prevents the label from rendering outside the camera frustum
-        state.distanceLabel.updateText(distanceString);
-        const labelOffsetX = arrowX - (cosA * this.hudDistance * 0.1);
-        const labelOffsetY = arrowY - (sinA * this.hudDistance * 0.1);
-        state.distanceLabel.getMesh().position.set(labelOffsetX, labelOffsetY, -this.hudDistance);
-        state.distanceLabel.getMesh().visible = true;
     }
 
     update() {
