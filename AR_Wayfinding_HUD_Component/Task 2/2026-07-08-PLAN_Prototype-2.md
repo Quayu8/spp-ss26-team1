@@ -2,11 +2,11 @@
 
 ## 1. Problem Statement and Use Case
 
-Task 2 produced the `ARWayfindingHUD` module and verified it in a desktop Three.js sandbox (keyboard-driven movement). To validate the HUD in a real AR context — where physical device movement drives the camera — a second test environment is required. This environment runs on a mobile device with ARCore, renders pre-defined world-space waypoints, and integrates the `ARWayfindingHUD` module as a direct copy.
+Prototype 1 produced the `ARWayfindingHUD` module and verified it in a desktop Three.js sandbox (keyboard-driven movement). To validate the HUD in a real AR context — where physical device movement drives the camera — a second test environment is required. This environment runs on a mobile device with ARCore, renders pre-defined world-space waypoints, and integrates the `ARWayfindingHUD` module as a direct copy.
 
 ## 2. Objectives and Success Criteria
 
-1. **Module copy:** `ARWayfindingHUD.js` and `DistanceLabel.js` are copied 1:1 from Task 2 into the Task 3 project. No relative cross-folder imports are used, keeping both projects self-contained.
+1. **Module copy:** `ARWayfindingHUD.js` and `DistanceLabel.js` are copied 1:1 from `AR_Wayfinding_HUD_Component/Task 2/AR-wayfinding-HUD-Prototype-1/` into `AR_Wayfinding_HUD_Component/Task 2/AR-wayfinding-HUD-Prototype-2/`. No relative cross-folder imports are used, keeping both projects self-contained.
 2. **Real AR session:** The app opens a WebXR `immersive-ar` session on an ARCore-capable Android device via Chrome.
 3. **Pre-defined waypoints:** A fixed set of world-space offsets in meters from the AR session origin is hard-coded in `main.js`. No GPS required — the session origin is wherever the user was standing when they tapped "Enter AR".
 4. **Physical locomotion:** The WebXR runtime (ARCore) drives the camera pose automatically from device movement. No keyboard or gamepad input.
@@ -14,24 +14,25 @@ Task 2 produced the `ARWayfindingHUD` module and verified it in a desktop Three.
 
 ## 3. Project Structure
 
-The project is a direct copy of `Task 2/AR-wayfinding-HUD-Prototype-1`, placed at `Task 3/AR-wayfinding-HUD-Prototype-2/`, with `main.js` replaced for the AR context.
+The project is a direct copy of `AR_Wayfinding_HUD_Component/Task 2/AR-wayfinding-HUD-Prototype-1/`, placed at `AR_Wayfinding_HUD_Component/Task 2/AR-wayfinding-HUD-Prototype-2/`, with `main.js` replaced for the AR context.
 
 ```
-Task 3/
-└── AR-wayfinding-HUD-Prototype-2/
+AR_Wayfinding_HUD_Component/
+└── Task 2/
+    └── AR-wayfinding-HUD-Prototype-2/
     ├── index.html          ← AR UI: #ar-root, #status overlay, #enter-ar button
     ├── package.json        ← Vite + three + vite-plugin-mkcert
     ├── vite.config.js      ← mkcert plugin + host: true
     └── src/
         ├── main.js         ← AR session bootstrap, waypoints, HUD integration
-        ├── ARWayfindingHUD.js   ← copied from Task 2, extended for mobile
-        ├── DistanceLabel.js     ← copied from Task 2, extended for mobile
-        └── assets/         ← optional HUD sprites (copied from Task 2)
+        ├── ARWayfindingHUD.js   ← copied from Prototype 1, extended for mobile
+        ├── DistanceLabel.js     ← copied from Prototype 1, extended for mobile
+        └── assets/         ← optional HUD sprites (copied from Prototype 1)
 ```
 
 ### 3.1 Framework Choice: Vite + Vanilla JS
 
-Identical stack to Task 2 (`AR-wayfinding-HUD-Prototype-1`). No TypeScript, no Angular — plain ES modules with Vite as the bundler. This keeps the project self-contained and the `ARWayfindingHUD.js` module usable without any transpilation step.
+Identical stack to `AR_Wayfinding_HUD_Component/Task 2/AR-wayfinding-HUD-Prototype-1/`. No TypeScript, no Angular — plain ES modules with Vite as the bundler. This keeps the project self-contained and the `ARWayfindingHUD.js` module usable without any transpilation step.
 
 ## 4. Mobile Accessibility — Local HTTPS with vite-plugin-mkcert
 
@@ -137,7 +138,7 @@ The non-XR desktop path continues to use `fov`/`aspect` as before.
 |---|---|
 | WebXR requires HTTPS | `vite-plugin-mkcert` provides locally-trusted cert |
 | `renderer.xr` not yet active at construction time | HUD is instantiated only after `setSession()` resolves |
-| `THREE.Sprite.material.rotation` for arrow sprites | Handled in `ARWayfindingHUD.js` (unchanged from Task 2) |
+| `THREE.Sprite.material.rotation` for arrow sprites | Handled in `ARWayfindingHUD.js` (unchanged from Prototype 1) |
 | DOM Overlay nesting — status/button must be inside `#ar-root` | `index.html` wraps all UI in `#ar-root`; canvas inserted as first child of same element |
 | `fov`/`aspect` unreliable on XR sub-camera | Frustum now computed from `projectionMatrix.elements` in XR path (see Section 7.2) |
 | Indicators/labels too large on mobile | `indicatorScale`, `labelScale` params + `hudDistance`-relative offsets (see Section 7.1) |
