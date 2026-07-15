@@ -81,6 +81,11 @@ export class ARWayfindingHUD {
         this._waypoints.splice(index, 1);
     }
 
+    /**
+     * Creates a shared basic material for HUD procedural geometries.
+     * @param {number|string} colorHex - The color for the material.
+     * @returns {THREE.MeshBasicMaterial}
+     */
     _createHudMaterial(colorHex) {
         return new THREE.MeshBasicMaterial({
             color: colorHex,
@@ -90,6 +95,11 @@ export class ARWayfindingHUD {
         });
     }
 
+    /**
+     * Resolves a texture source into a THREE.Texture instance.
+     * @param {string|THREE.Texture} source - URL string or texture instance.
+     * @returns {THREE.Texture}
+     */
     _resolveTexture(source) {
         if (source instanceof THREE.Texture) {
             return source;
@@ -97,6 +107,10 @@ export class ARWayfindingHUD {
         return new THREE.TextureLoader().load(source);
     }
 
+    /**
+     * Creates a sprite-based arrow indicator.
+     * @returns {THREE.Sprite}
+     */
     _createArrowSprite() {
         const texture = this._arrowTexture;
         const material = new THREE.SpriteMaterial({
@@ -113,6 +127,10 @@ export class ARWayfindingHUD {
         return sprite;
     }
 
+    /**
+     * Creates a sprite-based circle indicator.
+     * @returns {THREE.Sprite}
+     */
     _createCircleSprite() {
         const texture = this._circleTexture;
         const material = new THREE.SpriteMaterial({
@@ -129,6 +147,10 @@ export class ARWayfindingHUD {
         return sprite;
     }
 
+    /**
+     * Creates a procedural cone mesh for the arrow indicator.
+     * @returns {THREE.Mesh}
+     */
     _createArrowMesh() {
         if (!this._arrowGeometry) {
             const s = this._indicatorScale;
@@ -144,6 +166,10 @@ export class ARWayfindingHUD {
         return mesh;
     }
 
+    /**
+     * Creates a procedural ring mesh for the circle indicator.
+     * @returns {THREE.Mesh}
+     */
     _createCircleMesh() {
         if (!this._circleGeometry) {
             const s = this._indicatorScale;
@@ -158,6 +184,11 @@ export class ARWayfindingHUD {
         return mesh;
     }
 
+    /**
+     * Ensures that the target state objects for a specific index are initialized.
+     * @param {number} index - Index in the target states array.
+     * @returns {object} The state object for the given target.
+     */
     _ensureTargetState(index) {
         if (this.targetStates[index]) {
             return this.targetStates[index];
@@ -183,6 +214,11 @@ export class ARWayfindingHUD {
         return state;
     }
 
+    /**
+     * Synchronizes the internal target states array length to match the current waypoints.
+     * Hides extra indicators when fewer targets are active.
+     * @param {number} targetCount - The number of currently active targets.
+     */
     _syncTargetCount(targetCount) {
         for (let i = this.targetStates.length; i < targetCount; i += 1) {
             this._ensureTargetState(i);
@@ -197,6 +233,11 @@ export class ARWayfindingHUD {
         }
     }
 
+    /**
+     * Updates the transform and visibility of an individual target's state based on camera position.
+     * @param {THREE.Vector3} targetWorldPos - The world position of the target waypoint.
+     * @param {object} state - The indicator state object.
+     */
     _updateTargetState(targetWorldPos, state) {
         const evalCamera = getEvaluationCamera(this.renderer, this.camera);
         const placement = computeTargetPlacement({
@@ -243,6 +284,9 @@ export class ARWayfindingHUD {
         }
     }
 
+    /**
+     * Main update loop for the AR Wayfinding HUD. Syncs target counts and updates visuals.
+     */
     update() {
         const targetWorldPositions = this._waypoints;
         this._syncTargetCount(targetWorldPositions.length);

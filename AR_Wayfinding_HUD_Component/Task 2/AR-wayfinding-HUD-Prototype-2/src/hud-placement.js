@@ -1,9 +1,20 @@
 import * as THREE from 'three';
 
+/**
+ * Formats a numeric distance into a readable label string.
+ * @param {number} distance - Distance in meters.
+ * @returns {string} Formatted distance string (e.g. "1.5 m").
+ */
 export function formatDistanceLabel(distance) {
     return `${distance.toFixed(1)} m`;
 }
 
+/**
+ * Retrieves the evaluation camera, prioritizing the WebXR camera if currently presenting.
+ * @param {THREE.WebGLRenderer} renderer - The active Three.js renderer.
+ * @param {THREE.Camera} fallbackCamera - The default camera to use if XR is inactive.
+ * @returns {THREE.Camera} The optimal camera for HUD placement calculations.
+ */
 export function getEvaluationCamera(renderer, fallbackCamera) {
     if (renderer?.xr?.isPresenting) {
         const xrCamera = renderer.xr.getCamera?.();
@@ -19,6 +30,13 @@ export function getEvaluationCamera(renderer, fallbackCamera) {
     return fallbackCamera;
 }
 
+/**
+ * Calculates the physical width and height of the camera frustum at a specified distance.
+ * @param {THREE.Camera} camera - The active camera.
+ * @param {number} hudDistance - The distance from the camera to the HUD plane.
+ * @param {boolean} [isXrSession=false] - Whether WebXR is currently active.
+ * @returns {{width: number, height: number}} The dimensions of the frustum plane.
+ */
 export function getHudFrustumExtents(camera, hudDistance, isXrSession = false) {
     if (isXrSession) {
         const elements = camera.projectionMatrix.elements;
@@ -40,6 +58,21 @@ export function getHudFrustumExtents(camera, hudDistance, isXrSession = false) {
     };
 }
 
+/**
+ * Computes the optimal on-screen or off-screen placement details for a target waypoint.
+ * @param {object} params - Configuration and state parameters.
+ * @param {THREE.Vector3} params.targetWorldPos - The waypoint's world position.
+ * @param {THREE.Camera} params.camera - The active evaluation camera.
+ * @param {number} params.hudDistance - Z-distance for the HUD plane.
+ * @param {number} params.distanceMin - Distance threshold to hide indicators.
+ * @param {number} params.distanceMax - (Currently unused parameter for max distance).
+ * @param {string} [params.previousState='hidden'] - The target's state from the previous frame.
+ * @param {boolean} [params.isXrSession=false] - WebXR active flag.
+ * @param {number} [params.viewportInner=0.95] - Hysteresis threshold for arrow-to-circle transition.
+ * @param {number} [params.viewportOuter=1.0] - Hysteresis threshold for circle-to-arrow transition.
+ * @param {number} [params.edgeMargin=0.9] - Padding from screen edge for the arrow indicator.
+ * @returns {object} The computed placement state and transforms.
+ */
 export function computeTargetPlacement({
     targetWorldPos,
     camera,

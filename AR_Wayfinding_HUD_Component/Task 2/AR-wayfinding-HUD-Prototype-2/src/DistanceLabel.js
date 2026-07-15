@@ -82,6 +82,9 @@ export class DistanceLabel {
         return this.sprite;
     }
 
+    /**
+     * Disposes of Three.js resources to prevent memory leaks.
+     */
     dispose() {
         this.sprite.material.dispose();
         this.texture.dispose();
