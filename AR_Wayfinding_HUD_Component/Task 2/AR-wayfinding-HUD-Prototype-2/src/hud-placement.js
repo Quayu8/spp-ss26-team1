@@ -52,6 +52,8 @@ export function computeTargetPlacement({
     viewportOuter = 1.0,
     edgeMargin = 0.9,
 }) {
+    camera.updateMatrixWorld();
+
     const { width: frustumWidth, height: frustumHeight } = getHudFrustumExtents(
         camera,
         hudDistance,

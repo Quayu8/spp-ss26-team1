@@ -81,4 +81,9 @@ export class DistanceLabel {
     getMesh() {
         return this.sprite;
     }
-}
+
+    dispose() {
+        this.sprite.material.dispose();
+        this.texture.dispose();
+    }
+}

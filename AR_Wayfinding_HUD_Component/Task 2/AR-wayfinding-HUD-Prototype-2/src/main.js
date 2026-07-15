@@ -110,7 +110,10 @@ async function startAR() {
         setStatus('AR active.\nWalk around to test the HUD indicators.');
 
         session.addEventListener('end', () => {
-            hud = null;
+            if (hud) {
+                hud.destroy();
+                hud = null;
+            }
             enterArBtn.textContent = 'Enter AR';
             enterArBtn.disabled = false;
             setStatus('Session ended.\nTap "Enter AR" to restart.');
@@ -137,23 +140,8 @@ window.addEventListener('resize', () => {
 // Render loop — physical device movement drives the camera automatically via
 // the WebXR runtime (ARCore/ARKit); no keyboard input needed.
 // ---------------------------------------------------------------------------
-const testWaypoint = new THREE.Vector3(0, 0, 3);
-let testWaypointActive = false;
-let lastToggleTime = 0;
-
 renderer.setAnimationLoop((timestamp) => {
     if (hud) {
-        /* test update function of waypoints
-        if (timestamp - lastToggleTime >= 3000) {
-            lastToggleTime = timestamp;
-            if (testWaypointActive) {
-                hud.removeWaypoint(hud._waypoints.length - 1);
-                testWaypointActive = false;
-            } else {
-                hud.addWaypoint(testWaypoint);
-                testWaypointActive = true;
-            }
-        }*/
         hud.update();
     }
     renderer.render(scene, camera);

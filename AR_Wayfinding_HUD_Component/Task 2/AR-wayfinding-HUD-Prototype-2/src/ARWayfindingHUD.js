@@ -45,8 +45,8 @@ export class ARWayfindingHUD {
         this.distanceMax = config.distanceMax;
         this.hudDistance = config.hudDistance !== undefined ? config.hudDistance : 2.5;
 
-        this._arrowTexture = config.arrowSprite || null;
-        this._circleTexture = config.circleSprite || null;
+        this._arrowTexture = config.arrowSprite ? this._resolveTexture(config.arrowSprite) : null;
+        this._circleTexture = config.circleSprite ? this._resolveTexture(config.circleSprite) : null;
         this._useArrowSprite = !!this._arrowTexture;
         this._useCircleSprite = !!this._circleTexture;
         this._indicatorScale = config.indicatorScale !== undefined ? config.indicatorScale : 1.0;
@@ -98,9 +98,7 @@ export class ARWayfindingHUD {
     }
 
     _createArrowSprite() {
-        const texture = this._arrowTexture
-            ? this._resolveTexture(this._arrowTexture)
-            : null;
+        const texture = this._arrowTexture;
         const material = new THREE.SpriteMaterial({
             map: texture,
             color: texture ? 0xffffff : 0xff3b30,
@@ -116,9 +114,7 @@ export class ARWayfindingHUD {
     }
 
     _createCircleSprite() {
-        const texture = this._circleTexture
-            ? this._resolveTexture(this._circleTexture)
-            : null;
+        const texture = this._circleTexture;
         const material = new THREE.SpriteMaterial({
             map: texture,
             color: texture ? 0xffffff : 0xff3b30,
@@ -133,20 +129,30 @@ export class ARWayfindingHUD {
         return sprite;
     }
 
-    _createArrowMesh(colorHex = 0xff3b30) {
-        const s = this._indicatorScale;
-        const geo = new THREE.ConeGeometry(0.1 * s, 0.3 * s, 16);
-        geo.translate(0, 0.15 * s, 0);
-        const mesh = new THREE.Mesh(geo, this._createHudMaterial(colorHex));
+    _createArrowMesh() {
+        if (!this._arrowGeometry) {
+            const s = this._indicatorScale;
+            this._arrowGeometry = new THREE.ConeGeometry(0.1 * s, 0.3 * s, 16);
+            this._arrowGeometry.translate(0, 0.15 * s, 0);
+        }
+        if (!this._hudMaterial) {
+            this._hudMaterial = this._createHudMaterial(0xff3b30);
+        }
+        const mesh = new THREE.Mesh(this._arrowGeometry, this._hudMaterial);
         mesh.renderOrder = 999;
         mesh.visible = false;
         return mesh;
     }
 
-    _createCircleMesh(colorHex = 0xff3b30) {
-        const s = this._indicatorScale;
-        const geo = new THREE.RingGeometry(0.08 * s, 0.12 * s, 32);
-        const mesh = new THREE.Mesh(geo, this._createHudMaterial(colorHex));
+    _createCircleMesh() {
+        if (!this._circleGeometry) {
+            const s = this._indicatorScale;
+            this._circleGeometry = new THREE.RingGeometry(0.08 * s, 0.12 * s, 32);
+        }
+        if (!this._hudMaterial) {
+            this._hudMaterial = this._createHudMaterial(0xff3b30);
+        }
+        const mesh = new THREE.Mesh(this._circleGeometry, this._hudMaterial);
         mesh.renderOrder = 999;
         mesh.visible = false;
         return mesh;
@@ -245,5 +251,46 @@ export class ARWayfindingHUD {
             const state = this._ensureTargetState(index);
             this._updateTargetState(targetWorldPos, state);
         });
+    }
+
+    /**
+     * Cleans up all Three.js resources to prevent memory leaks when the AR session ends.
+     */
+    destroy() {
+        this.targetStates.forEach((state) => {
+            this.camera.remove(state.arrowMesh);
+            this.camera.remove(state.circleMesh);
+            this.camera.remove(state.distanceLabel.getMesh());
+
+            if (state.arrowMesh.geometry && state.arrowMesh.geometry !== this._arrowGeometry) {
+                state.arrowMesh.geometry.dispose();
+            }
+            if (state.arrowMesh.material) {
+                state.arrowMesh.material.dispose();
+            }
+
+            if (state.circleMesh.geometry && state.circleMesh.geometry !== this._circleGeometry) {
+                state.circleMesh.geometry.dispose();
+            }
+            if (state.circleMesh.material) {
+                state.circleMesh.material.dispose();
+            }
+
+            state.distanceLabel.dispose();
+        });
+
+        if (this._arrowGeometry) this._arrowGeometry.dispose();
+        if (this._circleGeometry) this._circleGeometry.dispose();
+        if (this._hudMaterial) this._hudMaterial.dispose();
+
+        if (this._arrowTexture instanceof THREE.Texture) {
+            this._arrowTexture.dispose();
+        }
+        if (this._circleTexture instanceof THREE.Texture) {
+            this._circleTexture.dispose();
+        }
+
+        this.targetStates = [];
+        this._waypoints = [];
     }
 }
